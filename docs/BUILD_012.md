@@ -25,3 +25,11 @@ Added `Faceoff.lua` and updated `FullMatch.lua` and the tab order. At the whistl
 In Codea, try early, ideal, and late inputs, and try each move against different CPU choices. Steer the exit after a clean win. Confirm wing players pursue a contested ball and that goals and period breaks return to the same faceoff sequence.
 
 Deterministic Lua and Craft mocks passed timed choices, early calls, rating/fatigue effects, directional exits, contested wing recovery, animation contact, game clock, and both restart paths.
+
+## Stage 4 · Career profile and game entry
+
+Added `Career.lua` and `CareerUI.lua`. Updated `Main.lua`, `UI.lua`, `FullMatch.lua`, and the tab order. The Road to the Pros menu stores a name, position, ratings, XP, and personal stats in Codea's local project data. It launches a playable evaluation game in the shared 10v10 engine with Player Lock. The career player keeps control even when another athlete gains possession.
+
+In Codea, open Career from the creator, choose a position, play a career game through the final horn, then return to the menu. Relaunch Codea and confirm the personal stats and result survived. A new character customization affects the same career athlete while ordinary Full Game and Practice remain separate.
+
+Craft mocks passed menu and match entry, all five positions, Player Lock, complete-result saving, and duplicate result protection. Persistence uses Codea's documented JSON and project-local storage.

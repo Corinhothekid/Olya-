@@ -71,8 +71,82 @@ local function openPlay(page)
     state.layout = nil
 end
 
+local function saveCareerResult(play)
+    if play.recorded or play.game.phase ~= "FINAL" then return end
+    local saved, reason = P.Career.record(state.career, play.fixture, play.game)
+    play.recorded, play.saveAttempted = saved, true
+    state.careerMessage = reason or (saved and "Game result saved")
+end
+
+local function openCareer()
+    state.page = "CAREER"
+    state.joystick, state.aim, state.sprint = nil, nil, nil
+    state.moveX, state.moveZ = 0, 0
+    state.layout = nil
+    if state.careerPlay and state.careerPlay.recorded then state.careerPlay = nil end
+end
+
+local function openCareerPlay()
+    if state.careerPlay and state.careerPlay.game.phase == "FINAL" then
+        saveCareerResult(state.careerPlay)
+        if state.careerPlay.recorded then state.careerPlay = nil end
+        return
+    end
+    if not state.careerPlay then
+        local fixture = P.Career.fixture(state.career)
+        if not fixture then return end
+        local scene = configuredScene()
+        local camera = P.CameraController.new(scene, 48)
+        P.CameraController.cycle(camera)
+        P.CameraController.cycle(camera)
+        local options = P.Career.matchOptions(state.career, fixture)
+        local game = P.FullMatch.new(scene, state.profile, state.career.team, fixture.opponent, options)
+        state.careerPlay = {scene=scene, camera=camera, game=game, fixture=fixture}
+    end
+    state.page = "CAREER_GAME"
+    state.layout = nil
+end
+
+local function finishName()
+    if not state.careerName then return end
+    P.Career.rename(state.career, state.careerName)
+    state.careerName = nil
+    if hideKeyboard then hideKeyboard() end
+end
+
+function keyboard(key)
+    if not state or not state.careerName then return end
+    if key == RETURN or key == "\n" then
+        finishName()
+    elseif key == BACKSPACE or key == "\b" then
+        local last = utf8 and utf8.offset(state.careerName, -1) or #state.careerName
+        state.careerName = state.careerName:sub(1, math.max(0, (last or 1)-1))
+    elseif type(key) == "string" and not key:match("[%c]") and #state.careerName+#key <= 24 then
+        state.careerName = state.careerName..key
+    end
+end
+
+local function careerTouch(touch)
+    if touch.state ~= BEGAN then return end
+    local hud = P.CareerUI.layout(state.career)
+    local function hit(item) return P.UI.hit(item, touch.x, touch.y) end
+    if hit(hud.back) then
+        finishName()
+        openCreator()
+    elseif hit(hud.name) and showKeyboard then
+        state.careerName = state.career.name
+        showKeyboard()
+    elseif hit(hud.position) and not state.careerPlay then
+        P.Career.setPosition(state.career, state.career.position % #P.Career.positions+1)
+    elseif hit(hud.play) then
+        finishName()
+        openCareerPlay()
+    end
+end
+
 local function activePlay()
     if state.page == "MATCH" then return state.match, P.FullMatch end
+    if state.page == "CAREER_GAME" then return state.careerPlay, P.FullMatch end
     return state.practice, P.Gameplay
 end
 
@@ -129,12 +203,18 @@ function setup()
         displayMode(FULLSCREEN)
     end
     local profile = P.Profile.load()
-    state = {profile=profile, uniform=P.TeamUniform.fromProfile(profile), categoryIndex=4}
+    state = {profile=profile, uniform=P.TeamUniform.fromProfile(profile),
+        categoryIndex=4, career=P.Career.load()}
     openCreator()
 end
 
 function draw()
     local dt = math.max(0, math.min(DeltaTime or 1/60, .05))
+    if state.page == "CAREER" then
+        P.CareerUI.draw(state.career, P.CareerUI.layout(state.career), state.careerPlay,
+            state.careerName ~= nil, state.careerName, state.careerMessage)
+        return
+    end
     local hud = currentHUDLayout()
     if state.page == "CREATOR" then
         local selection = category()
@@ -147,13 +227,16 @@ function draw()
         creator.scene:draw()
         local selected = state.profile[selection.key]
         P.UI.creator(hud, selection, state.categoryIndex, selected,
-            P.UI.firstOption(selection, selected))
+            P.UI.firstOption(selection, selected), true)
     else
         local play, controller = activePlay()
         P.UI.step(hud, dt)
         updateSprint(play.game, dt)
         controller.update(play.game, dt, worldMoveX(play), state.moveZ)
-        if state.page == "MATCH" then
+        if state.page == "CAREER_GAME" and not play.saveAttempted then
+            saveCareerResult(play)
+        end
+        if state.page ~= "PRACTICE" then
             P.CameraController.match(play.camera, play.game, dt, state.aim and state.aim.shown, hud.frame)
         else
             P.CameraController.practice(play.camera, play.game, dt, state.aim and state.aim.shown, hud.frame)
@@ -182,10 +265,17 @@ local function updateChoice(index)
     if state.match then
         P.FullMatch.applyProfile(state.match.game, state.profile, state.profile.TEAM, state.profile.OPPONENT)
     end
+    if state.careerPlay then
+        P.FullMatch.applyProfile(state.careerPlay.game, state.profile)
+    end
 end
 
 local function creatorTouch(touch, hud)
     if touch.state == BEGAN then
+        if P.UI.hit(hud.career, touch.x, touch.y) then
+            openCareer()
+            return
+        end
         if P.UI.hit(hud.done, touch.x, touch.y) then
             openPlay("PRACTICE")
             return
@@ -286,10 +376,11 @@ local function playTouch(touch, hud)
 
     if touch.state == BEGAN then
         if P.UI.hit(hud.edit, touch.x, touch.y) then
-            openCreator()
+            if state.page == "CAREER_GAME" then openCareer() else openCreator() end
             return
         end
         if P.UI.hit(hud.reset, touch.x, touch.y) then
+            if state.page == "CAREER_GAME" and play.recorded then return end
             P.UI.press(hud, hud.reset, touch.id)
             state.aim, state.sprint = nil, nil
             controller.command(game, "reset")
@@ -346,6 +437,8 @@ function touched(touch)
     if not state then return end
     if state.page == "CREATOR" then
         creatorTouch(touch, currentHUDLayout())
+    elseif state.page == "CAREER" then
+        careerTouch(touch)
     else
         playTouch(touch, currentHUDLayout())
     end
@@ -372,7 +465,8 @@ function setup()
         local missing = {}
         for _, name in ipairs({
             "Profile", "TeamUniform", "Character", "AnimationController",
-            "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch", "UI"
+            "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
+            "Defense", "Faceoff", "UI", "Career", "CareerUI"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

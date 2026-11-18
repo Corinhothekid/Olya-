@@ -18,6 +18,8 @@
 		<string>Faceoff</string>
 		<string>FullMatch</string>
 		<string>UI</string>
+		<string>Career</string>
+		<string>CareerUI</string>
 	</array>
 </dict>
 </plist>

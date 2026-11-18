@@ -288,6 +288,7 @@ local faceoffActions = {shoot="faceoff",dodge="counter"}
 function UI.action(game, item)
     if not item then return nil end
     local id = item.id
+    if id == "switch" and game.careerPlayer then return nil end
     if game.phase == "FACEOFF" then
         local draw = game.faceoff
         if draw and (draw.userTeam == false or draw.phase == "EXIT") then return nil end

@@ -128,24 +128,25 @@ local function attach(match, index, select)
         Match.recordStat(match, contestant, "faceoffs")
         match.faceoffScramble = nil
     end
-    match.carrier, match.lastTouch = index, player.team
+    match.carrier, match.lastTouch, match.assist = index, player.team, nil
     match.flight, match.loose, match.pending = nil, nil, nil
     match.scoopPlayer = nil
     match.ball.position = pocket(player)
     match.ballVelocity = vec3()
-    if select and player.team == 1 then match.controlled = index end
+    if select and player.team == 1 and not careerLock(match) then match.controlled = index end
     if match.mode == "SWING" then match.mode = "SET" end
 end
 
 local function freeBall(match, position, velocity, lastTouch)
     match.carrier, match.flight, match.pending, match.scoopPlayer = nil, nil, nil, nil
-    match.loose, match.lastTouch = true, lastTouch
+    match.loose, match.lastTouch, match.assist = true, lastTouch, nil
     match.ball.position, match.ballVelocity = position, velocity
     if match.mode == "SWING" then match.mode = "SET" end
 end
 
 local function startFaceoff(match)
     local afterPeriod = match.phase == "INTERMISSION"
+    match.assist = nil
     match.phase, match.phaseTime = "FACEOFF", 0
     match.mode, match.clearTime = "SET", 0
     match.pending, match.flight, match.loose, match.carrier = nil, nil, nil, nil
@@ -205,7 +206,7 @@ function Match.applyProfile(match, profile, homeId, awayId)
     applyTeamKits(match, homeId or match.homeId, awayId or match.awayId)
     for index, player in ipairs(match.squad) do
         local kit = match.kits[player.team]
-        if index == userPlayer then
+        if index == (match.careerPlayer or userPlayer) then
             P.Character.apply(player.rig, profile, nil, kit, false)
             player.number = player.rig.numberValue
         else
@@ -221,6 +222,8 @@ function Match.new(scene, profile, homeId, awayId, rules)
         field=field, goalsByTeam=field.goals, goal=vec3(homeGoal.x, homeGoal.top * .5, homeGoal.z),
         ball=makeBall(scene), marker=makeMarker(scene), squad={}, teams={{},{}}, keepers={}, rules=matchRules(rules)
     }
+    local slot = rules and tonumber(rules.careerPlayerSlot)
+    if slot then match.careerPlayer = clamp(math.floor(slot), 1, 10) end
     P.MatchAI.registerAnimations()
     P.Defense.registerAnimations()
     P.Faceoff.registerAnimations(P.AnimationController)
@@ -230,7 +233,8 @@ function Match.new(scene, profile, homeId, awayId, rules)
         for slot, spec in ipairs(formation) do
             local index = #match.squad + 1
             local rig = P.Character.new(scene)
-            local appearance = index == userPlayer and profile or playerProfile(team, slot)
+            local appearance = index == (match.careerPlayer or userPlayer)
+                and profile or playerProfile(team, slot)
             P.Character.apply(rig, appearance, nil, match.kits[team], false)
             local player = {
                 id=index, team=team, slot=slot, role=spec[1], name=spec[1]..spec[2],
@@ -239,6 +243,17 @@ function Match.new(scene, profile, homeId, awayId, rules)
                 attributes=P.Defense.attributes(spec[1])
             }
             if slot == 4 then player.attributes.faceoff = .68 end
+            if index == match.careerPlayer then
+                player.name = rules.playerName or player.name
+                for key, value in pairs(rules.playerAttributes or {}) do
+                    if type(value) == "number" then player.attributes[key] = value end
+                end
+                if player.role == "G" then
+                    for _, key in ipairs({"reflexes", "handSpeed", "clearingAccuracy"}) do
+                        if player.attributes[key] then player[key] = player.attributes[key] / 100 end
+                    end
+                end
+            end
             match.squad[index] = player
             match.teams[team][slot] = index
             if player.role == "G" then match.keepers[team] = index end
@@ -333,7 +348,7 @@ function Match.command(match, action, moveX, moveZ, aim)
     local player = match.squad[match.controlled]
     local holder = match.carrier and match.squad[match.carrier]
     if action == "switch" then
-        match.controlled = nextPlayer(match)
+        if not careerLock(match) then match.controlled = nextPlayer(match) end
     elseif action == "clear" then
         match.mode, match.clearTime = "CLEAR", 4.5
         announce(match, "CLEAR THROUGH")
@@ -405,7 +420,8 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
         local vx, vz = 0, 0
         if player.id == match.controlled then
             local rate = match.sprinting and 1.18 or 1
-            vx, vz = moveX * 8.8 * rate, -moveZ * 8.8 * rate
+            local pace = 8.8 + ((player.attributes.speed or 62) - 62) * .034
+            vx, vz = moveX * pace * rate, -moveZ * pace * rate
         elseif intent and intent.x and intent.z then
             local dx, dz = intent.x - player.x, intent.z - player.z
             local length = distance(dx, dz)
@@ -469,7 +485,9 @@ local function release(match, pending)
         local target = match.squad[pending.to]
         local length = distance(target.x - player.x, target.z - player.z)
         flight.to = target.id
-        flight.duration = clamp(length / 23, .35, 2.4)
+        local skill = player.role == "G" and player.attributes.clearingAccuracy or player.attributes.passing
+        local velocity = 23 + ((skill or 60) - 60) * .12
+        flight.duration = clamp(length / velocity, .35, 2.4)
         flight.arc = clamp(length * .060, .18, 1.25)
         Match.recordStat(match, player.id, "passes")
         match.ballVelocity = (pocket(target) - origin) / flight.duration
@@ -477,7 +495,8 @@ local function release(match, pending)
         local goal = match.goalsByTeam[player.team]
         local x, y = aimPoint(match, pending, player)
         local span = math.sqrt((x - origin.x)^2 + (goal.z - origin.z)^2)
-        local time = clamp(span / 32, .11, 2.1)
+        local velocity = 32 + ((player.attributes.shooting or 60) - 60) * .15
+        local time = clamp(span / velocity, .11, 2.1)
         flight.duration = time + .29
         flight.velocity = vec3((x - origin.x) / time, (y - origin.y) / time + .5 * gravity * time,
             (goal.z - origin.z) / time)
@@ -532,7 +551,7 @@ end
 
 local function act(match, intents)
     for index, intent in pairs(intents) do
-        if index ~= match.controlled then
+        if index ~= match.controlled or (intent.action == "save" and index == match.careerPlayer) then
             local player = match.squad[index]
             local action = intent.action
             if action == "pass" then startPass(match, player, intent.target)
@@ -577,6 +596,11 @@ local function score(match, flight, hit)
     Match.recordStat(match, flight.from, "goals")
     Match.recordStat(match, flight.from, "shotsOnGoal")
     Match.recordStat(match, flight.from, "score")
+    local assist = match.assist
+    if assist and assist.to == flight.from and match.elapsed-assist.at <= 8 then
+        Match.recordStat(match, assist.from, "assists")
+    end
+    match.assist = nil
     match.homeScore, match.awayScore = match.stats[1].goals, match.stats[2].goals
     match.flight, match.loose, match.carrier = nil, nil, nil
     local fixed = P.GoalPhysics.capture(flight.goal, hit.position)
@@ -606,6 +630,7 @@ local function updateFlight(match, dt, catchIndex)
         elseif catchIndex == flight.to then
             attach(match, flight.to, match.controlled == flight.from)
             Match.recordStat(match, flight.from, "completions")
+            match.assist = {from=flight.from,to=flight.to,at=match.elapsed}
         elseif progress >= 1 then
             freeBall(match, position, vec3(0, -.6, 0), flight.team)
             announce(match, "PASS DROPPED")
