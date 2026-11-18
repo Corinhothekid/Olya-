@@ -80,6 +80,7 @@ end
 
 local function openCareer()
     state.page = "CAREER"
+    state.careerView, state.careerPage = "profile", 1
     state.joystick, state.aim, state.sprint = nil, nil, nil
     state.moveX, state.moveZ = 0, 0
     state.layout = nil
@@ -126,20 +127,56 @@ function keyboard(key)
     end
 end
 
+local function careerLayout()
+    return P.CareerUI.layout(state.career, state.careerView, state.careerPlay,
+        state.careerSkill, state.careerPage)
+end
+
 local function careerTouch(touch)
     if touch.state ~= BEGAN then return end
-    local hud = P.CareerUI.layout(state.career)
-    local function hit(item) return P.UI.hit(item, touch.x, touch.y) end
+    local career, hud = state.career, careerLayout()
+    local function hit(item) return item and P.UI.hit(item, touch.x, touch.y) end
     if hit(hud.back) then
         finishName()
         openCreator()
+        return
+    end
+    for _, button in ipairs(hud.nav) do
+        if hit(button) then
+            finishName()
+            state.careerView, state.careerPage = button.id, 1
+            return
+        end
+    end
+    if not state.careerPlay then
+        for _, button in ipairs(hud.offerButtons or {}) do
+            if hit(button) and P.CareerSeason.accept(career, button.id) then
+                state.careerView, state.careerPage = "profile", 1
+                state.careerMessage = "Season started"
+                return
+            end
+        end
+    end
+    if hit(hud.leftPage) then
+        state.careerPage = hud.page - 1
+    elseif hit(hud.rightPage) then
+        state.careerPage = hud.page + 1
     elseif hit(hud.name) and showKeyboard then
-        state.careerName = state.career.name
+        state.careerName = career.name
         showKeyboard()
     elseif hit(hud.position) and not state.careerPlay then
-        P.Career.setPosition(state.career, state.career.position % #P.Career.positions+1)
+        P.Career.setPosition(career, career.position % #P.Career.positions+1)
     elseif hit(hud.team) and not state.careerPlay then
-        P.Career.cycleSchool(state.career)
+        P.Career.cycleSchool(career)
+    elseif hit(hud.nextSkill) then
+        state.careerSkill = (state.careerSkill or 1) % 4 + 1
+    elseif hit(hud.train) and hud.train.enabled and not state.careerPlay then
+        if P.CareerSeason.train(career, hud.train.id) then state.careerMessage = "Attribute improved" end
+    elseif hit(hud.advance) and not state.careerPlay then
+        if P.CareerSeason.advance(career) then
+            state.careerView, state.careerPage = "profile", 1
+            state.careerMessage = "Season started"
+        end
     elseif hit(hud.play) then
         finishName()
         openCareerPlay()
@@ -163,12 +200,13 @@ local function updateSprint(game, dt)
     local offense = game.homeScore == nil or holder and holder.team == 1
     local controlled = game.squad[game.controlled]
     local energy = controlled.stamina or 1
-    game.sprinting = live and offense and state.sprint ~= nil and moving
-        and energy > (game.sprinting and .01 or .08)
+    game.sprinting = live and offense and not game.careerWaiting
+        and state.sprint ~= nil and moving and energy > (game.sprinting and .01 or .08)
     for _, player in ipairs(game.squad) do
         local effort = game.sprinting and player == controlled
-        player.stamina = math.max(0, math.min(1, (player.stamina or 1)
-            + dt * (effort and -.30 or live and .17 or .32)))
+        local endurance = (player.attributes and player.attributes.stamina or 60)/100
+        local rate = effort and (-.36 + endurance*.1) or live and (.11+endurance*.1) or .32
+        player.stamina = math.max(0, math.min(1, (player.stamina or 1) + dt * rate))
     end
 end
 
@@ -213,7 +251,7 @@ end
 function draw()
     local dt = math.max(0, math.min(DeltaTime or 1/60, .05))
     if state.page == "CAREER" then
-        P.CareerUI.draw(state.career, P.CareerUI.layout(state.career), state.careerPlay,
+        P.CareerUI.draw(state.career, careerLayout(), state.careerPlay,
             state.careerName ~= nil, state.careerName, state.careerMessage)
         return
     end
@@ -249,8 +287,14 @@ function draw()
         local a = P.CameraController.project(play.camera, position)
         local b = P.CameraController.project(play.camera, position + vec3(.35, 0, 0))
         if a and b and a.x ~= b.x then play.horizontal = b.x < a.x and -1 or 1 end
+        local mode = P.CameraController.mode(play.camera)
+        local ballEdge
+        if mode == "PLAYER LOCK" and (play.game.phase == nil or play.game.phase == "LIVE") then
+            ballEdge = P.CameraController.ballEdge(play.camera, play.game.ball.position,
+                hud.frame, hud.leftX, hud.rightX)
+        end
         P.UI.practice(hud, play.game, state.moveX, state.moveZ,
-            aimGuide(play, controller, dt), P.CameraController.mode(play.camera))
+            aimGuide(play, controller, dt), mode, ballEdge)
     end
 end
 
@@ -468,7 +512,7 @@ function setup()
         for _, name in ipairs({
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
-            "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams"
+            "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

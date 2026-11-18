@@ -1,52 +1,253 @@
--- PolyLax Build 012 | Road to the Pros menu
+-- PolyLax Build 012 | Road to the Pros
 PolyLax = PolyLax or {}
 local P = PolyLax
 local UI = {}
 P.CareerUI = UI
 
-local deep = color(7, 19, 35)
-local surface = color(20, 40, 62)
-local soft = color(158, 182, 206)
-local white = color(246, 249, 255)
-local amber = color(253, 205, 85)
+local backgroundColor = color(7,19,35)
+local surface = color(19,37,58)
+local raised = color(28,50,73)
+local border = color(43,65,86)
+local muted = color(164,183,204)
+local white = color(246,249,255)
+local amber = color(253,205,85)
+local green = color(111,229,182)
+local red = color(255,155,145)
 
-local function box(x, y, w, h, label)
-    return {x=x, y=y, w=w, h=h, label=label}
+local tabs = {
+    {id="profile",label="Overview"},
+    {id="schedule",label="Schedule"},
+    {id="standings",label="Standings"},
+    {id="offers",label="Offers"}
+}
+
+local function box(x,y,w,h,label,id)
+    return {x=x,y=y,w=w,h=h,label=label,id=id}
 end
 
-function UI.layout(career)
+local function teamName(id)
+    local team = id and P.TeamUniform.get(id)
+    return team and team.name or ""
+end
+
+local function overview(l, career, playing, training)
+    local width, center, top = l.w,l.x,l.contentTop
+    local column = (width-8)*.5
+    l.name = box(center,top-22,width,42,career.name,"name")
+    local position = P.Career.positions[career.position] or P.Career.positions[2]
+    l.position = box(l.left+column*.5,top-70,column,43,position.label,"position")
+    l.team = box(l.right-column*.5,top-70,column,43,P.Career.teamName(career),"team")
+    l.summary = box(center,top-134,width,76)
+    l.statsY = top-185
+    if training then
+        l.nextSkill = box(l.left+column*.5,top-225,column,43,training.label,"nextSkill")
+        l.train = box(l.right-column*.5,top-225,column,43,"Train +"..(training.gain or 1),training.key)
+        l.train.enabled = training.available and not playing or false
+        l.training = training
+    end
+end
+
+local function listLayout(l, entries, requestedPage, height)
+    local start = l.contentTop-34
+    local reserve = l.bottom+103
+    local capacity = math.max(1,math.floor((start-reserve)/height))
+    l.pages = math.max(1,math.ceil(#entries/capacity))
+    l.page = math.max(1,math.min(l.pages,math.floor(tonumber(requestedPage) or 1)))
+    l.rows = {}
+    local first = (l.page-1)*capacity+1
+    for i=first,math.min(#entries,first+capacity-1) do
+        l.rows[#l.rows+1] = {
+            item=box(l.x,start-((i-first)+.5)*height,l.w,height-5),
+            value=entries[i]
+        }
+    end
+
+    if l.page > 1 then
+        l.leftPage = box(l.left+43,l.bottom+84,86,32,"Previous","previous")
+    end
+    if l.page < l.pages then
+        l.rightPage = box(l.right-43,l.bottom+84,86,32,"Next","next")
+    end
+end
+
+function UI.layout(career, view, playing, trainIndex, page)
+    view = view or "profile"
     local safe = P.UI.safeArea()
-    local width = math.min(480, WIDTH-safe.left-safe.right-32)
+    local width = math.min(480,WIDTH-safe.left-safe.right-28)
     local center = (WIDTH+safe.left-safe.right)*.5
-    local top, bottom = HEIGHT-safe.top-18, math.max(26, safe.bottom+15)
-    return {
-        x=center, w=width, top=top, bottom=bottom,
-        back=box(center-width*.5+37,top-20,74,36,"Back"),
-        name=box(center,top-122,width,44,career.name),
-        position=box(center,top-177,width,44,P.Career.positions[career.position].label),
-        team=box(center,top-232,width,44,P.Career.teamName(career)),
-        play=box(center,bottom+26,width,48,"Play career game")
+    local top, bottom = HEIGHT-safe.top-12,math.max(18,safe.bottom+10)
+    local left, right = center-width*.5,center+width*.5
+    local season = P.CareerSeason
+    local status = season and season.status(career)
+    local fixture = not playing and (season and season.fixture(career) or
+        not season and P.Career.fixture(career))
+    local l = {
+        x=center,w=width,left=left,right=right,top=top,bottom=bottom,contentTop=top-91,
+        view=view,nav={},offerButtons={},fixture=fixture,status=status,
+        back=box(left+29,top-19,58,36,"Back","back")
     }
+    for i, tab in ipairs(tabs) do
+        local span = width/#tabs
+        l.nav[i] = box(left+span*(i-.5),top-61,span-4,37,tab.label,tab.id)
+    end
+    if playing then
+        local finished = playing.game.phase == "FINAL"
+        l.play = box(center,bottom+23,width,46,
+            finished and "Retry saving result" or "Resume career game","play")
+    elseif fixture then
+        l.play = box(center,bottom+23,width,46,"Play next game","play")
+    elseif career.stage == "professional" and status and status.canAdvance then
+        l.advance = box(center,bottom+23,width,46,"Start next pro season","advance")
+    end
+
+    if view == "schedule" then
+        listLayout(l,season and season.schedule(career) or {},page,37)
+    elseif view == "standings" then
+        listLayout(l,season and season.standings(career) or {},page,34)
+    elseif view == "offers" then
+        listLayout(l,season and season.offers(career) or {},page,49)
+        if not playing then
+            for _, row in ipairs(l.rows) do
+                local item = row.item
+                item.id = row.value.id
+                l.offerButtons[#l.offerButtons+1] = item
+            end
+        end
+    else
+        overview(l,career,playing,season and season.training(career,trainIndex or 1))
+    end
+    return l
 end
 
-local function label(value, x, y, size, tint)
+local function label(value,x,y,size,tint,maxWidth)
+    if type(value) ~= "string" or value == "" then return end
     fill(tint)
     fontSize(size)
+    if maxWidth and textSize then
+        local width = textSize(value)
+        if width > maxWidth then fontSize(math.max(9,size*maxWidth/width)) end
+    end
     text(value,x,y)
 end
 
-local function card(item, sub, strong, disabled)
+local function rectAt(item,tint)
     rectMode(CENTER)
-    fill(strong and amber or surface)
+    fill(tint)
     rect(item.x,item.y,item.w,item.h)
-    if sub then label(sub,item.x,item.y+9,10,soft) end
-    label(item.label,item.x,item.y-(sub and 7 or 0),strong and 15 or 13,
-        strong and deep or disabled and soft or white)
 end
 
-function UI.draw(career, l, playing, editing, draft, message)
-    background(deep)
+local function leading(value,x,y,size,tint,maxWidth)
+    textMode(CORNER)
+    label(value,x,y-size*.54,size,tint,maxWidth)
+    textMode(CENTER)
+end
+
+local function card(item,sub,strong,disabled)
+    rectAt(item,strong and amber or surface)
+    local tint = strong and backgroundColor or disabled and muted or white
+    if sub then label(sub,item.x,item.y+9,9,strong and backgroundColor or muted,item.w-12) end
+    label(item.label,item.x,item.y-(sub and 7 or 0),strong and 14 or 13,tint,item.w-12)
+end
+
+local function drawOverview(career,l,editing,draft,playing)
+    local name = l.name
+    if editing then name = box(name.x,name.y,name.w,name.h,(draft or "").."|") end
+    card(name,"PLAYER NAME")
+    card(l.position,"POSITION",false,career.games>0 or playing)
+    card(l.team,"TEAM",false,career.games>0 or playing)
+    local status = l.status or {}
+    local summary, stats = l.summary,career.stats
+    rectAt(summary,surface)
+    local title = type(status.title) == "string" and status.title
+        or status.title == true and "CHAMPIONSHIP WON" or P.Career.stages[career.stage]
+    label(title,l.x,summary.y+25,12,amber,l.w-18)
+    local xp = math.max(0,career.xp-(career.spentXP or 0))
+    label(string.format("RECORD  %d–%d–%d     XP  %d",career.wins,career.losses,career.ties,xp),
+        l.x,summary.y+7,13,white,l.w-18)
+    local role = status.starter == true and "STARTER" or status.starter == false and "RESERVE"
+    local detail = status.statusLine or ""
+    if role then detail = role .. (detail == "" and "" or "  ·  "..detail) end
+    label(detail,l.x,summary.y-11,10,muted,l.w-18)
+    local award = (status.championships or 0) > 0 and ("Titles "..status.championships)
+    if status.contract then
+        award = status.contract .. (award and "  ·  "..award or "")
+    end
+    label(award,l.x,summary.y-26,9,muted,l.w-18)
+    label(string.format("%d G   %d A   %d GB   %d CTO   %d SV   %d FO",
+        stats.goals or 0,stats.assists or 0,stats.groundBalls or 0,stats.causedTurnovers or 0,
+        stats.saves or 0,stats.faceoffs or 0),l.x,l.statsY,11,white,l.w-10)
+    if l.training then
+        local training = l.training
+        card(l.nextSkill,"SKILL  "..tostring(training.value).."   ›",false)
+        local cost = training.available and ("COST  "..tostring(training.cost).." XP")
+            or (training.value >= 99 and "MAX RATING" or ("NEEDS "..tostring(training.cost).." XP"))
+        card(l.train,cost,l.train.enabled,not l.train.enabled)
+    end
+end
+
+local function gameResultTint(result)
+    local first = result and result:sub(1,1)
+    return first == "W" and green or first == "L" and red or muted
+end
+
+local function drawSchedule(l)
+    leading("FIXTURES",l.left+3,l.contentTop-12,11,muted)
+    for _, row in ipairs(l.rows) do
+        local item, fixture = row.item,row.value
+        rectAt(item,fixture.current and raised or surface)
+        if fixture.current then rectAt(box(l.left+2,item.y,4,item.h),amber) end
+        local venue = fixture.home == false and "AT" or "VS"
+        leading(venue.."  "..fixture.opponent,l.left+10,item.y+5,12,white,l.w-106)
+        leading(fixture.label,l.left+10,item.y-8,9,muted,l.w-106)
+        local result = fixture.result or (fixture.current and "NEXT" or "—")
+        label(result,l.right-44,item.y,11,fixture.current and amber or gameResultTint(result),77)
+    end
+    if #l.rows == 0 then label("No fixtures scheduled",l.x,l.contentTop-78,14,muted) end
+end
+
+local function drawStandings(career,l)
+    local w = l.w
+    local sites = {l.right-w*.36,l.right-w*.28,l.right-w*.20,l.right-w*.115,l.right-w*.04}
+    leading("TEAM",l.left+10,l.contentTop-12,10,muted)
+    for i,value in ipairs({"W","L","T","PTS","+/-"}) do
+        label(value,sites[i],l.contentTop-12,9,muted)
+    end
+    for _,row in ipairs(l.rows) do
+        local item,team = row.item,row.value
+        local selected = team.id == career.team
+        rectAt(item,selected and raised or surface)
+        if selected then rectAt(box(l.left+2,item.y,4,item.h),amber) end
+        leading(team.name,l.left+9,item.y,11,selected and amber or white,w*.56)
+        local numbers = {team.wins,team.losses,team.ties,team.points,team.differential}
+        for i,value in ipairs(numbers) do label(tostring(value),sites[i],item.y,10,white) end
+    end
+    if #l.rows == 0 then label("Standings appear with the season",l.x,l.contentTop-78,13,muted) end
+end
+
+local function drawOffers(l,playing)
+    local title = #l.rows > 0 and "SELECT AN OFFER" or "RECRUITING & CONTRACTS"
+    leading(title,l.left+3,l.contentTop-12,11,muted)
+    for _, row in ipairs(l.rows) do
+        local item, offer = row.item,row.value
+        rectAt(item,playing and surface or raised)
+        leading(offer.name,l.left+11,item.y+7,13,white,l.w-45)
+        leading(offer.detail,l.left+11,item.y-9,10,muted,l.w-45)
+        if not playing then label("›",l.right-18,item.y,21,amber) end
+    end
+    if #l.rows == 0 then
+        local status = l.status or {}
+        label(status.contract or "No offers yet",l.x,l.contentTop-74,15,white,l.w-18)
+        label(status.statusLine,l.x,l.contentTop-99,11,muted,l.w-18)
+        if (status.championships or 0) > 0 then
+            label("Championships  "..status.championships,l.x,l.contentTop-125,12,amber)
+        end
+    end
+end
+
+function UI.draw(career,l,playing,editing,draft,message)
+    background(backgroundColor)
     pushStyle()
+    pushMatrix()
     resetMatrix()
     ortho()
     viewMatrix(matrix())
@@ -55,26 +256,35 @@ function UI.draw(career, l, playing, editing, draft, message)
     textAlign(CENTER)
     font("AvenirNext-DemiBold")
     card(l.back)
-    label("Road to the Pros",l.x,l.top-54,24,white)
-    label(P.Career.stages[career.stage],l.x,l.top-82,12,amber)
-    if editing then
-        card(box(l.name.x,l.name.y,l.name.w,l.name.h,draft.."|"),"PLAYER NAME")
-    else
-        card(l.name,"PLAYER NAME")
+    leading("Road to the Pros",l.left+69,l.top-16,19,white,l.w-76)
+    local stage = P.Career.stages[career.stage]
+    local season = l.status and l.status.season or career.season
+    leading((stage or "").."   ·   SEASON "..(season or 1),l.left+70,l.top-32,9,amber,l.w-76)
+    for _,tab in ipairs(l.nav) do
+        local active = tab.id == l.view
+        rectAt(tab,active and raised or surface)
+        if active then rectAt(box(tab.x,tab.y-tab.h*.5+1,tab.w,2,tab.label),amber) end
+        label(tab.label,tab.x,tab.y,12,active and amber or muted,tab.w-3)
     end
-    card(l.position,"POSITION",false,career.games>0)
-    card(l.team,"TEAM",false,career.games>0 or playing)
-    local y = l.top-275
-    label(string.format("RECORD  %d–%d–%d       XP  %d",career.wins,career.losses,career.ties,career.xp),
-        l.x,y,13,white)
-    local stats = career.stats
-    label(string.format("%d G   %d A   %d GB   %d CTO   %d SV   %d FO",
-        stats.goals or 0,stats.assists or 0,stats.groundBalls or 0,stats.causedTurnovers or 0,
-        stats.saves or 0,stats.faceoffs or 0),l.x,y-21,12,soft)
-    if message then label(message,l.x,l.bottom+72,11,amber) end
-    if playing then
-        l.play.label = playing.game.phase == "FINAL" and "Retry saving result" or "Resume career game"
+
+    if l.view == "schedule" then drawSchedule(l)
+    elseif l.view == "standings" then drawStandings(career,l)
+    elseif l.view == "offers" then drawOffers(l,playing)
+    else drawOverview(career,l,editing,draft,playing) end
+
+    if l.pages and l.pages > 1 then
+        if l.leftPage then card(l.leftPage) end
+        if l.rightPage then card(l.rightPage) end
+        label(string.format("%d / %d",l.page,l.pages),l.x,l.bottom+84,11,muted)
     end
-    card(l.play,nil,true)
+    if l.play then
+        local opponent = l.fixture and teamName(l.fixture.opponent)
+        local detail = opponent and ((l.fixture.home == false and "AT " or "VS ")..opponent)
+        card(l.play,detail,true)
+    elseif l.advance then
+        card(l.advance,nil,true)
+    end
+    if message then label(message,l.x,l.bottom+58,11,amber,l.w-10) end
+    popMatrix()
     popStyle()
 end

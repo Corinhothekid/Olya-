@@ -25,7 +25,7 @@ local function school(id, name, short, group, colors, labels, source)
         away={teamId=id, primary=white, secondary=primary, shorts=white,
             shell=shell, accent=accent, gloves=shell, number=colors.number and number or primary},
         field={id=id, wordmark=labels[1], endWordmark=labels[2], centerWordmark=labels[3] or short,
-            primary=primary, accent=accent, lettering=colors.number and number or nil}
+            primary=primary, secondary=secondary, accent=accent, lettering=colors.number and number or nil}
     }
 end
 
@@ -86,6 +86,18 @@ SchoolTeams.highSchool = {
         {primary=0x203C72, secondary=0x79D4A2}, {"FOXMERE", "LAKE FOXES"})
 }
 
+-- Fictional club opponents keep the Florida State schedule within club competition.
+SchoolTeams.clubLeague = {SchoolTeams.club[1],
+    school("bayhaven-club", "Bayhaven State Club", "BSC", "club",
+        {primary=0x144E78, secondary=0xF1B846}, {"BAYHAVEN", "STATE CLUB"}),
+    school("coastal-tech-club", "Coastal Tech Club", "CTC", "club",
+        {primary=0x087F74, secondary=0xCDF1DB}, {"COASTAL TECH", "LACROSSE CLUB"}),
+    school("north-gulf-club", "North Gulf Club", "NGC", "club",
+        {primary=0x752754, secondary=0xEFBCC8}, {"NORTH GULF", "LACROSSE CLUB"}),
+    school("pine-coast-club", "Pine Coast Club", "PCC", "club",
+        {primary=0x285039, secondary=0xECBD57}, {"PINE COAST", "LACROSSE CLUB"})
+}
+
 SchoolTeams.college = {}
 local byId, aliases = {}, {uva="virginia", nd="notre-dame"}
 for _, group in ipairs({SchoolTeams.ncaa, SchoolTeams.club, SchoolTeams.highSchool}) do
@@ -97,6 +109,11 @@ for _, group in ipairs({SchoolTeams.ncaa, SchoolTeams.club, SchoolTeams.highScho
     end
 end
 
+for _, team in ipairs(SchoolTeams.clubLeague) do
+    byId[team.id] = team
+    if team.id ~= "florida-state" then team.fictional = true end
+end
+
 function SchoolTeams.get(id)
     if type(id) ~= "string" then return end
     local key = id:lower():gsub("^%s+", ""):gsub("%s+$", ""):gsub("[%s_]+", "-")
@@ -106,7 +123,8 @@ end
 function SchoolTeams.defaultOpponent(id)
     local home = SchoolTeams.get(id)
     if not home then return end
-    local candidates = home.group == "highSchool" and SchoolTeams.highSchool or SchoolTeams.ncaa
+    local candidates = home.group == "highSchool" and SchoolTeams.highSchool
+        or home.group == "club" and SchoolTeams.clubLeague or SchoolTeams.ncaa
     for _, team in ipairs(candidates) do
         if team.id ~= home.id then return team end
     end

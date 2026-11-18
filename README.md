@@ -1,22 +1,13 @@
-# PolyLax 🥍
+# PolyLax
 
-Portrait-oriented 3D lacrosse game prototype for **Codea (Lua + Craft)** on iPhone.
+PolyLax is a portrait 3D lacrosse game for Codea Legacy Craft on iPhone. Build 012 includes the player creator, six-player Practice, 10v10 Full Game, and Road to the Pros career play.
 
-## Repository status
-This repository archives available historical PolyLax builds. **These are snapshots, not verified working releases.** Do not assume the newest build contains all earlier animations.
+## Install
 
-## Source layout
-- `archive/`: historical standalone `Main.lua` versions. Preserve unchanged for regression comparisons.
-- `docs/CODEX_INSTRUCTIONS.md`: development guidance and priorities.
+Import the complete `PolyLax.codea` project or copy all 18 Lua files into Codea tabs in the order given by `PolyLax.codea/Info.plist`. Use the single-tab Lua release file when installing by pasting into one `Main` tab. Both editions use assets built into Craft.
 
-## Running a historical build
-Open Codea on iPhone, create a project, and paste the contents of a selected archived `Main.lua` into its Main tab. Test each build separately.
+See [Build 012 installation, changes, and test checklist](docs/BUILD_012.md). Lua and mocked Craft tests passed. Native iPhone testing remains pending.
 
-## Development priorities
-1. Restore and preserve animations.
-2. Fix creator camera and XRS Pro-inspired helmet fit.
-3. Implement robust goal-plane collision and ball settling in the net.
-4. Add selectable PLL-inspired team palettes and propagate uniforms to the full roster.
-5. Add full-field 10v10 play, goalkeeper/defensive AI, and eventually career mode.
+## History
 
-**Important:** The latest Codea source currently running on the user's device may be newer than the archived versions here. Obtain and commit that source before attempting a merge or claiming a feature is restored.
+The active project starts from the workspace Build 011 Gameplay recovery commit. The five historical standalone versions remain as reference snapshots in `archive/`. This Build 012 branch keeps the recovery commit and the six implementation stages in order.

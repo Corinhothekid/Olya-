@@ -50,7 +50,9 @@ function Match.recordStat(match, index, key, amount)
     if not player then return end
     local team = match.stats[player.team]
     local increment = amount or 1
-    player.stats[key] = (player.stats[key] or 0) + increment
+    if not (match.careerWaiting and index == match.careerPlayer) then
+        player.stats[key] = (player.stats[key] or 0) + increment
+    end
     team[key] = (team[key] or 0) + increment
 end
 
@@ -163,7 +165,7 @@ local function startFaceoff(match)
         second.faceoffFatigue = math.max(0, second.faceoffFatigue - .15)
     end
     match.faceoff = P.Faceoff.new(match.rules.faceoff, first, second, match.faceoffSerial,
-        (not locked or locked == first.id) and 1 or false)
+        (not locked or locked == first.id and not match.careerWaiting) and 1 or false)
     local reset = P.AnimationController.reset
     for _, player in ipairs(match.squad) do
         player.x, player.z = player.homeX, player.homeZ
@@ -187,6 +189,7 @@ local function resetMatch(match)
     match.period, match.clock, match.elapsed = 1, match.rules.periodLength, 0
     match.stats = {newStats(), newStats()}
     match.faceoffSerial = 0
+    match.careerWaiting = match.careerEntryDelay and match.careerEntryDelay > 0
     for _, player in ipairs(match.squad) do
         player.stats = newStats()
         player.faceoffFatigue = 0
@@ -196,7 +199,12 @@ local function resetMatch(match)
 end
 
 local function applyTeamKits(match, homeId, awayId)
-    local homeKit, awayKit, homeTeam, awayTeam = P.TeamUniform.matchKits(homeId, awayId)
+    local homeKit, awayKit, homeTeam, awayTeam
+    if match.venueAway then
+        awayKit, homeKit, awayTeam, homeTeam = P.TeamUniform.matchKits(awayId, homeId)
+    else
+        homeKit, awayKit, homeTeam, awayTeam = P.TeamUniform.matchKits(homeId, awayId)
+    end
     match.homeTeam, match.awayTeam = homeTeam, awayTeam
     match.homeId, match.awayId = homeTeam.id, awayTeam.id
     match.kits = {homeKit, awayKit}
@@ -221,11 +229,15 @@ function Match.new(scene, profile, homeId, awayId, rules)
     local field = P.Field.new(scene, venue.field, rules.fieldMetrics)
     local homeGoal = field.goals[1]
     local match = {
-        field=field, goalsByTeam=field.goals, goal=vec3(homeGoal.x, homeGoal.top * .5, homeGoal.z),
+        field=field, venueAway=rules.venueAway == true, goalsByTeam=field.goals, goal=vec3(homeGoal.x, homeGoal.top * .5, homeGoal.z),
         ball=makeBall(scene), marker=makeMarker(scene), squad={}, teams={{},{}}, keepers={}, rules=matchRules(rules)
     }
     local slot = rules and tonumber(rules.careerPlayerSlot)
-    if slot then match.careerPlayer = clamp(math.floor(slot), 1, 10) end
+    if slot then
+        match.careerPlayer = clamp(math.floor(slot), 1, 10)
+        match.careerEntryDelay = clamp(tonumber(rules.careerEntryDelay) or 0, 0,
+            math.min(10,match.rules.periodLength*.3))
+    end
     P.MatchAI.registerAnimations()
     P.Defense.registerAnimations()
     P.Faceoff.registerAnimations(P.AnimationController)
@@ -309,7 +321,7 @@ local function startScoop(match, player)
 end
 
 function Match.canAim(match)
-    return match.phase == "LIVE" and match.carrier == match.controlled
+    return not match.careerWaiting and match.phase == "LIVE" and match.carrier == match.controlled
         and not match.pending and not match.squad[match.controlled].anim.action
 end
 
@@ -338,6 +350,7 @@ function Match.command(match, action, moveX, moveZ, aim)
         resetMatch(match)
         return
     end
+    if match.careerWaiting then return end
     if match.phase == "FACEOFF" then
         if action == "pass" or action == "shoot" then action = "clamp" end
         if P.Faceoff.input(match.faceoff, action) and match.faceoff.phase == "SET" then
@@ -420,7 +433,7 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
     for _, player in ipairs(match.squad) do
         local intent = intents[player.id]
         local vx, vz = 0, 0
-        if player.id == match.controlled then
+        if player.id == match.controlled and not match.careerWaiting then
             local rate = match.sprinting and 1.18 or 1
             local pace = 8.8 + ((player.attributes.speed or 62) - 62) * .034
             vx, vz = moveX * pace * rate, -moveZ * pace * rate
@@ -553,7 +566,8 @@ end
 
 local function act(match, intents)
     for index, intent in pairs(intents) do
-        if index ~= match.controlled or (intent.action == "save" and index == match.careerPlayer) then
+        if index ~= match.controlled or match.careerWaiting
+            or (intent.action == "save" and index == match.careerPlayer) then
             local player = match.squad[index]
             local action = intent.action
             if action == "pass" then startPass(match, player, intent.target)
@@ -828,6 +842,10 @@ local function pursueDraw(match, intents, dt)
 end
 
 local function live(match, dt, moveX, moveZ)
+    if match.careerWaiting and match.elapsed >= match.careerEntryDelay then
+        match.careerWaiting = false
+        announce(match, "YOUR SHIFT", 1.7)
+    end
     local length = math.max(distance(moveX, moveZ), 1)
     moveX, moveZ = moveX / length, moveZ / length
     match.moveX, match.moveZ = moveX, moveZ
@@ -840,7 +858,7 @@ local function live(match, dt, moveX, moveZ)
     act(match, intents)
     planCatch(match, dt)
     if match.flight then P.Defense.prepareIntercept(match, match.flight) end
-    if match.loose then startScoop(match, match.squad[match.controlled]) end
+    if match.loose and not match.careerWaiting then startScoop(match, match.squad[match.controlled]) end
     movePlayers(match, dt, moveX, moveZ, intents)
     local animation = P.AnimationController
     local flight, loose = match.flight, match.loose

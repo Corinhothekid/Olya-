@@ -35,7 +35,8 @@ local function team(id, name, short, shopSlug, homeColor, home, away)
         approximateRGB = true,
         fieldType = "professional", ruleset = "adult",
         field = {id=id, wordmark=name:match(" (%S+)$"), endWordmark=name:match("^(.*) %S+$"),
-            centerWordmark=short, primary=home.primary, accent=home.accent, lettering=home.number},
+            centerWordmark=short, primary=home.primary, secondary=home.secondary,
+            accent=home.accent, lettering=home.number},
         home = home, away = away
     }
 end

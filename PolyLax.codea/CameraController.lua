@@ -114,6 +114,29 @@ function Camera.project(camera, position)
     return vec2(WIDTH * .5 + view.x * factor, HEIGHT * .5 + view.y * factor)
 end
 
+-- Keep the ball's direction readable when a locked player is away from play.
+function Camera.ballEdge(camera, ball, frame, left, right)
+    local screen = Camera.project(camera, ball)
+    local low, high = frame.bottom+16, frame.top-16
+    left, right = left+16, right-16
+    if screen and screen.x >= left and screen.x <= right
+        and screen.y >= low and screen.y <= high then return end
+    local x, y = (left+right)*.5, (low+high)*.5
+    local dx, dy
+    if screen then
+        dx, dy = screen.x-x, screen.y-y
+    else
+        local view = camera.entity:inverseTransformPoint(ball)
+        dx, dy = view.x, math.min(-.25,view.y)
+    end
+    local scale = math.min((right-x)/math.max(.001,math.abs(dx)),
+        (high-y)/math.max(.001,math.abs(dy)))
+    local length = math.sqrt(dx*dx+dy*dy)
+    if length > .001 then
+        return {x=x+dx*scale,y=y+dy*scale,dx=dx/length,dy=dy/length}
+    end
+end
+
 local function clamp(value, low, high)
     return math.max(low, math.min(high, value))
 end

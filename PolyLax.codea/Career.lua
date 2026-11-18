@@ -66,14 +66,30 @@ function Career.load()
     if saved.name == "" then saved.name = fresh.name end
     if not Career.stages[saved.stage] then saved.stage = fresh.stage end
     if type(saved.team) ~= "string" and type(saved.team) ~= "number" then saved.team = fresh.team end
-    if saved.stage == "highSchool" then
-        local school = P.SchoolTeams.get(saved.team)
-        if not school or school.group ~= "highSchool" then saved.team = fresh.team end
+    local school = P.SchoolTeams.get(saved.team)
+    if saved.stage == "highSchool" and (not school or school.group ~= "highSchool") then
+        saved.team = fresh.team
+    elseif saved.stage == "college" and (not school or school.group == "highSchool") then
+        saved.team = "syracuse"
+    elseif saved.stage == "professional" then
+        saved.team = bounded(saved.team, 1, #P.TeamUniform.teams)
+    elseif school then
+        saved.team = school.id
     end
     for _, key in ipairs({"games", "wins", "losses", "ties", "xp"}) do
         saved[key] = bounded(saved[key], 0, 1000000)
     end
     saved.season = bounded(saved.season, 1, 10000)
+    saved.championships = bounded(saved.championships, 0, 10000)
+    saved.spentXP = bounded(saved.spentXP, 0, saved.xp)
+    if saved.stage == "professional" then
+        local contract = type(saved.contract) == "table" and saved.contract or {}
+        saved.contract = {length=bounded(contract.length,1,5),remaining=bounded(contract.remaining,0,5),
+            value=bounded(contract.value,0,1000000)}
+    else
+        saved.contract = nil
+    end
+    saved.history = type(saved.history) == "table" and saved.history or {}
     local attributes = defaults(saved.position)
     for key in pairs(attributes) do
         if type(saved.attributes) == "table" and type(saved.attributes[key]) == "number" then
@@ -123,15 +139,17 @@ function Career.cycleSchool(career)
 end
 
 function Career.fixture(career)
-    local opponent = P.SchoolTeams.defaultOpponent(career.team)
-    return {id="showcase-" .. (career.games+1), opponent=opponent.id, home=true, label="Showcase"}
+    return P.CareerSeason.fixture(career)
 end
 
 function Career.matchOptions(career, fixture)
     local home = P.TeamUniform.get(career.team)
     local age = home.ruleset
-    return {name="Career short game", periods=2, periodLength=75, intermissionTime=2,
+    return {name="Career short game", periods=2, periodLength=60, intermissionTime=2,
         ageGroup=age, bodyContact=age == "highSchool" or age == "adult",
+        faceoffDifficulty=career.stage == "professional" and "HARD" or "NORMAL",
+        careerEntryDelay=P.CareerSeason.status(career).starter and 0 or 4,
+        fieldTeam=fixture.home and career.team or fixture.opponent, venueAway=not fixture.home,
         careerPlayerSlot=position(career.position).slot, playerName=career.name,
         playerAttributes=copy(career.attributes)}
 end
@@ -157,9 +175,13 @@ function Career.record(career, fixture, match)
     if win then nextSave.wins = nextSave.wins + 1
     elseif tie then nextSave.ties = nextSave.ties + 1
     else nextSave.losses = nextSave.losses + 1 end
-    nextSave.xp = nextSave.xp + 20 + (win and 10 or 0) + personal.goals * 6
+    local earned = 20 + (win and 10 or 0) + personal.goals * 6
         + personal.assists * 5 + personal.saves * 3 + personal.faceoffs * 4
         + personal.groundBalls * 2 + personal.causedTurnovers * 4 + personal.interceptions * 3
+    nextSave.xp = nextSave.xp + earned
+    if not P.CareerSeason.record(nextSave, fixture, match, earned, personal) then
+        return false, "This result does not match the scheduled game"
+    end
     nextSave.entries[fixture.id] = {home=match.homeScore, away=match.awayScore,
         opponent=fixture.opponent, stats=personal}
     if not Career.save(nextSave) then return false, "Save unavailable" end

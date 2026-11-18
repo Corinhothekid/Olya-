@@ -288,7 +288,7 @@ local faceoffActions = {shoot="faceoff",dodge="counter"}
 function UI.action(game, item)
     if not item then return nil end
     local id = item.id
-    if id == "switch" and game.careerPlayer then return nil end
+    if game.careerWaiting or id == "switch" and game.careerPlayer then return nil end
     if game.phase == "FACEOFF" then
         local draw = game.faceoff
         if draw and (draw.userTeam == false or draw.phase == "EXIT") then return nil end
@@ -499,9 +499,24 @@ local function finalScore(game, layout)
     label(string.format("TURNOVERS   %d - %d",home.turnovers,away.turnovers),x,y-52,12,white)
 end
 
-function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel)
+local function drawBallEdge(mark)
+    if not mark then return end
+    local x, y, dx, dy = mark.x,mark.y,mark.dx,mark.dy
+    rounded(x-dx*6,y-dy*6,22,22,10,glass)
+    fill(warm)
+    ellipseMode(CENTER)
+    ellipse(x-dx*6,y-dy*6,6)
+    stroke(warm)
+    strokeWidth(2)
+    line(x+dx*7,y+dy*7,x-dy*4,y+dx*4)
+    line(x+dx*7,y+dy*7,x+dy*4,y-dx*4)
+    noStroke()
+end
+
+function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel, ballEdge)
     beginHud()
     drawAim(aim)
+    drawBallEdge(ballEdge)
     drawScore(layout,game)
     chip(layout,layout.camera,cameraLabel or "CAMERA","camera")
     chip(layout,layout.zoomOut,"","zoomOut")
@@ -529,7 +544,8 @@ function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel)
         finalScore(game,layout)
     else
         drawFaceoff(layout,game)
-        local message = game.announcementTime > 0 and game.announcement
+        local message = game.careerWaiting and game.phase == "LIVE" and "FIRST SHIFT SOON"
+            or game.announcementTime > 0 and game.announcement
             or game.clock <= 0 and game.homeScore == nil and "PRACTICE COMPLETE"
         if message and message ~= "" then
             local y = layout.frame.top-15

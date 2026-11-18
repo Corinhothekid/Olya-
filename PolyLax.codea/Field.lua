@@ -93,7 +93,13 @@ end
 local function createTurf(scene, halfWidth, halfLength, theme)
     local perimeter, light, dark = batch(), batch(), batch()
     rectangle(perimeter, -halfWidth - 25, halfWidth + 25, -halfLength - 20, halfLength + 20, -.034)
-    render(scene, perimeter, theme and theme.apron or perimeterColor)
+    local apron = theme and theme.apron or perimeterColor
+    if theme and theme.secondary and not theme.apron then
+        local tint = theme.secondary
+        apron = color(perimeterColor.r*.82+tint.r*.18,
+            perimeterColor.g*.82+tint.g*.18, perimeterColor.b*.82+tint.b*.18)
+    end
+    render(scene, perimeter, apron)
     local stripeLength = 10 * yard
     local count = math.ceil(halfLength * 2 / stripeLength)
     for stripe = 0, count - 1 do
@@ -201,7 +207,7 @@ local function createBranding(scene, field, theme)
     local midPaint = theme.lettering and midfield or paint
     word(midPaint, theme.centerWordmark or theme.wordmark, -3.15, .65 * x, 1.62, .012)
     render(scene, panels, theme.primary)
-    render(scene, accents, theme.accent)
+    render(scene, accents, theme.accent or theme.secondary or white)
     if #paint.positions > 0 then render(scene, paint, theme.lettering or white) end
     if #midfield.positions > 0 then render(scene, midfield, white) end
 end

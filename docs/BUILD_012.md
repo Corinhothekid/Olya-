@@ -41,3 +41,25 @@ Added `SchoolTeams.lua` and updated `TeamUniform.lua`, `Field.lua`, `FullMatch.l
 In Codea, choose a fictional high school before starting Career and inspect the field in Broadcast. Test standard Full Game with different PLL teams. For a direct venue test, pass `"florida-state"` as the first team ID to `FullMatch.new` and inspect its garnet and gold theme.
 
 Lua mocks checked kit contrast, existing PLL IDs, all school theme mesh bounds, and configurable field metrics. The final visual palette, lettering, and frame rate remain to be checked on iPhone.
+
+## Stage 6 · Schedule and progression
+
+Added `CareerSeason.lua` and updated `Career.lua`, `CareerUI.lua`, `Main.lua`, `FullMatch.lua`, `UI.lua`, `CameraController.lua`, `SchoolTeams.lua`, `TeamUniform.lua`, `Field.lua`, and the tab order. Career fixtures have a balanced home and away schedule, venue themes, standings, playoffs, and saved results. Evaluation players take control on their first shift. Performance earns control from the opening whistle and XP to improve position-specific attributes. Personal and season records cover goals, assists, ground balls, caused turnovers, interceptions, saves, faceoff wins, and other events.
+
+A completed high-school season generates recruiting offers. Florida State is a club option with a separate fictional club schedule. College or club performance feeds the pro entry offers. Pro seasons track in-game contracts, playoffs, and championships. Player Lock provides a direction marker when the ball leaves the portrait play area.
+
+### Install and play
+
+Open the complete Build 012 `Main.lua` in a fresh Codea Legacy Craft project with one tab, or import the organized `PolyLax.codea` folder and its `Info.plist`. In an existing project, keep a copy of its original tabs and save data before installing. Codea profiles and career saves are local to the installed project.
+
+1. From the creator, confirm the player renders and the view, rotate gesture, gear and team selections still work.
+2. Open Practice and confirm six offensive players plus the goalie. Try passes, a dodge, simultaneous sprint and joystick, hold-to-aim shots, a missed shot, an in-net hold, and a scoop.
+3. Open Full Game. Cycle all three cameras. Broadcast should show both goals and the field in portrait. Use Poke, Slap, and Body, recover a loose ball, attempt an interception, and try Clamp and Counter at the meter.
+4. Open Career, name your athlete, select a position and fictional school, and finish a game. Relaunch Codea and confirm the result, stats and next fixture appear. Open Schedule and Standings, try training when you have enough XP, and play through a postseason or recruiting offer.
+5. Test on a physical iPhone with safe-area insets. Inspect the camera, uniforms and paint, and check touch input and frame rate.
+
+### Verification and scope
+
+Lua syntax checks, deterministic gameplay tests, and Craft mocks cover the HUD, camera projection, both match modes, checks, interceptions, faceoffs, school paint and kits, career save/restore, balanced scheduling, training, playoffs, and high-school-to-pro progression. One shortened career match ran through the match engine. Multi-season progression tests applied simulated final scores. iPhone Codea rendering, frame rate, touch feel, and persistence still need device verification.
+
+Career opponents, schedules, recruiting thresholds, and contract values are game simulations. Campus and pro palettes use original field lettering and no team logos. CPU schedule results are simulated. The contact rules and shortened periods are arcade rules. Evaluation shifts hand off the same roster slot, and the build has no substitution management, official league scheduling, or licensing integration. An unfinished game resumes while the project is running. On relaunch, the scheduled fixture restarts and completed results persist.
