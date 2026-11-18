@@ -1,0 +1,730 @@
+-- PolyLax Build 011 | MatchAI
+PolyLax = PolyLax or {}
+local AI = {}
+PolyLax.MatchAI = AI
+
+local TACTICAL_INTERVAL = .16
+local BALL_RADIUS = .09
+local GRAVITY = 9.8
+local atan2 = math.atan2 or math.atan
+
+local function clamp(value, low, high)
+    return math.max(low, math.min(value, high))
+end
+
+local function distanceSquared(ax, az, bx, bz)
+    local dx, dz = ax - bx, az - bz
+    return dx*dx + dz*dz
+end
+
+local function planDistance(ax, az, bx, bz)
+    return math.sqrt(distanceSquared(ax, az, bx, bz))
+end
+
+local function unit(dx, dz, fallbackZ)
+    local length = math.sqrt(dx*dx + dz*dz)
+    if length < .0001 then return 0, fallbackZ or 0 end
+    return dx / length, dz / length
+end
+
+local function goalX(goal)
+    return goal.x or 0
+end
+
+local function goalHeight(goal)
+    return goal.height or goal.top or goal.crossbar or 1.83
+end
+
+function AI.new()
+    return {
+        elapsed=0, nextTick=0, phase=nil, lastTeam=nil,
+        intents={}, players={}, goalies={},
+        tactics={{mark={}}, {mark={}}},
+        awareness={}
+    }
+end
+
+local function ballTeam(match)
+    if match.carrier then return match.squad[match.carrier].team end
+    if match.flight and match.flight.kind == "pass" then
+        return match.squad[match.flight.from].team
+    end
+end
+
+local function updateAwareness(match, ai)
+    local snapshot = ai.awareness
+    snapshot.ball = match.ball.position
+    snapshot.velocity = match.ballVelocity
+    snapshot.carrier = match.carrier
+    snapshot.possessionTeam = ballTeam(match)
+    snapshot.phase = match.phase
+    snapshot.flight = match.flight
+    snapshot.loose = match.loose ~= nil
+    snapshot.teams = match.teams
+    snapshot.players = ai.players
+    for id, player in ipairs(match.squad) do
+        local entry = ai.players[id] or {}
+        ai.players[id] = entry
+        entry.id, entry.team, entry.role = id, player.team, player.role
+        entry.x, entry.z = player.x, player.z
+        entry.teammates, entry.opponents = match.teams[player.team], match.teams[3 - player.team]
+        local goal = match.goalsByTeam[player.team]
+        entry.distanceToGoal = planDistance(player.x, player.z, goalX(goal), goal.z)
+        entry.distanceToBall = planDistance(player.x, player.z, snapshot.ball.x, snapshot.ball.z)
+        entry.phase = snapshot.phase
+    end
+    return snapshot
+end
+
+local function move(intent, x, z)
+    intent.x, intent.z = x, z
+end
+
+local function restrict(match, intent)
+    local field = match.field
+    intent.x = clamp(intent.x, -field.halfWidth + .5, field.halfWidth - .5)
+    intent.z = clamp(intent.z, -field.halfLength + .5, field.halfLength - .5)
+end
+
+local function nearestOpponent(match, player)
+    local best, bestDistance = nil, math.huge
+    for _, id in ipairs(match.teams[3 - player.team]) do
+        local opponent = match.squad[id]
+        if opponent.role ~= "G" then
+            local distance = distanceSquared(player.x, player.z, opponent.x, opponent.z)
+            if distance < bestDistance then best, bestDistance = opponent, distance end
+        end
+    end
+    return best, math.sqrt(bestDistance)
+end
+
+local function laneDanger(match, from, to)
+    local x, z = to.x-from.x, to.z-from.z
+    local lengthSquared = x*x + z*z
+    if lengthSquared < .001 then return math.huge end
+    local risk = 0
+    for _, id in ipairs(match.teams[3 - from.team]) do
+        local defender = match.squad[id]
+        local fraction = clamp(((defender.x-from.x)*x + (defender.z-from.z)*z) / lengthSquared, 0, 1)
+        local anticipation = fraction * .25
+        local px = defender.x + (defender.vx or 0) * anticipation
+        local pz = defender.z + (defender.vz or 0) * anticipation
+        local distance = planDistance(px, pz, from.x + x*fraction, from.z + z*fraction)
+        if fraction > .07 and distance < 2.3 then
+            risk = math.max(risk, (2.3 - distance) * (fraction > .90 and .8 or 1))
+        end
+    end
+    return risk
+end
+
+function AI.passTarget(match, fromID, swing)
+    local from = match.squad[fromID]
+    if not from then return nil end
+    local goal = match.goalsByTeam[from.team]
+    local gainSign = from.team == 1 and -1 or 1
+    local best, rating = nil, -math.huge
+    for _, targetID in ipairs(match.teams[from.team]) do
+        local to = match.squad[targetID]
+        local distance = planDistance(from.x, from.z, to.x, to.z)
+        if targetID ~= fromID and to.role ~= "G" and distance >= 2 and distance <= 34 then
+            local advance = (to.z - from.z) * gainSign
+            local risk = laneDanger(match, from, to)
+            local _, space = nearestOpponent(match, to)
+            local score = 5.8 - math.abs(distance - 10) * .12 - risk * 2.6
+            score = score + math.min(space, 7) * .38 + clamp(advance, -9, 15) * .12
+            if from.role == "G" then
+                score = score + math.min(math.abs(to.x), 15) * .08 + clamp(advance, -12, 24) * .16
+            elseif swing then
+                score = score + math.min(math.abs(to.x-from.x), 21) * .16
+                if to.x * from.x < 0 then score = score + .5 end
+            else
+                local goalDistance = planDistance(to.x, to.z, goalX(goal), goal.z)
+                if goalDistance < 14 then score = score + 1.5 - goalDistance * .06 end
+            end
+            if score > rating then best, rating = targetID, score end
+        end
+    end
+    return best, rating
+end
+
+local function moveKeeper(match, keeper, intent, ball, sightTime)
+    local goal = match.goalsByTeam[3 - keeper.team]
+    local cx = goalX(goal)
+    local inside = goal.z < 0 and 1 or -1
+    local depth = (ball.z - goal.z) * inside
+    local lateral = ball.x - cx
+    local angle = atan2(lateral, math.max(2.5, depth))
+    local arc = 1.08 + ((keeper.positioning or .78) - .5) * .34
+    local px = cx + math.sin(angle) * arc
+    local pz = goal.z + math.cos(angle) * arc * inside
+    if depth < .4 then
+        px = cx + clamp(lateral * .18, -.86, .86)
+        pz = goal.z + .34 * inside
+    end
+    if sightTime then
+        px = cx + clamp(lateral, -.98, .98) * .83
+        pz = goal.z + .76 * inside
+    end
+    move(intent, px, pz)
+    intent.lookX, intent.lookZ = ball.x, ball.z
+    intent.role = sightTime and "SHOT" or "GOAL ARC"
+    intent.speed = 2.7 + (keeper.footwork or .73) * (sightTime and 4.1 or 2.5)
+end
+
+local function teamSlot(player)
+    return (player.id - 1) % 10 + 1
+end
+
+local function offBallAttack(match, ai, snapshot, team)
+    local goal = match.goalsByTeam[team]
+    local cx = goalX(goal)
+    local inside = goal.z < 0 and 1 or -1
+    local ball = snapshot.ball
+    local distance = (ball.z - goal.z) * inside
+    local advance = clamp((distance - 24) * .78, 0, match.field.halfLength * 1.45)
+    local spread = clamp(math.abs(ball.x - cx) * .18, 0, 3.5)
+    local sides, depths = {-8.8, 8.8, 0, -6.4, 6.4, 0}, {10.4, 10.4, -4, 18.5, 18.5, 7}
+    local tactic = ai.tactics[team]
+    local carrierID = match.carrier
+    local carrier = carrierID and match.squad[carrierID]
+    for _, identifier in ipairs(match.teams[team]) do
+        local player = match.squad[identifier]
+        local intent = ai.intents[identifier]
+        local slot = teamSlot(player)
+        if player.role == "G" then
+            moveKeeper(match, player, intent, ball)
+        elseif slot <= 6 then
+            local x, z = sides[slot], depths[slot] + advance
+            if match.mode == "CLEAR" and advance < 2 then
+                if slot < 3 then x, z = x * 1.46, 2 end
+                if slot == 6 then x, z = ball.x > 0 and -5.6 or 5.6, 14 end
+            elseif slot == 3 then
+                x = x - ball.x * .11
+            else
+                x = x + (x < 0 and -spread or spread) + ball.x*.08
+            end
+            if tactic.cut == identifier and advance < 3 and slot ~= 3 then
+                x, z = -ball.x * .10, 6.1
+            end
+            move(intent, cx + x, goal.z + z * inside)
+            intent.lookX, intent.lookZ = ball.x, ball.z
+            intent.role = tactic.cut == identifier and "CUT" or advance > 8 and "TRANSITION" or "2-3-1"
+        else
+            local ownGoal = match.goalsByTeam[3 - team]
+            local depthFromOwn = (ball.z - ownGoal.z) * -inside
+            local reserve = clamp(depthFromOwn * .42 + 7, 8, 34)
+            move(intent, player.homeX + ball.x*.08, ownGoal.z - reserve * inside)
+            intent.lookX, intent.lookZ = ball.x, ball.z
+            intent.role = "RELEASE SUPPORT"
+        end
+    end
+
+    if not carrier or carrier.team ~= team or carrier.role == "G" then
+        tactic.picker = nil
+        return
+    end
+    local defender, pressure = nearestOpponent(match, carrier)
+    local intent = ai.intents[carrierID]
+    local approachX, approachZ = unit(cx - carrier.x, goal.z - carrier.z, -inside)
+    if distance < 5.2 then
+        local side = carrier.x >= 0 and 1 or -1
+        move(intent, cx + 4.4 * side, goal.z + 6 * inside)
+    else
+        move(intent, carrier.x + approachX*7, carrier.z + approachZ*7)
+    end
+    intent.lookX, intent.lookZ = cx, goal.z
+    intent.role = "BALL"
+
+    local now = ai.elapsed
+    if now >= (tactic.nextCut or 0) and distance < 22 then
+        local best, bestSpace = nil, -math.huge
+        for _, identifier in ipairs(match.teams[team]) do
+            local player = match.squad[identifier]
+            if player.role == "A" and identifier ~= carrierID and player.x * ball.x <= 0 then
+                local _, space = nearestOpponent(match, player)
+                local score = space - planDistance(player.x, player.z, cx, goal.z) * .15
+                if score > bestSpace then best, bestSpace = identifier, score end
+            end
+        end
+        tactic.cut, tactic.nextCut = best, now + 2.1
+    elseif now >= (tactic.nextCut or 0) or distance > 25 then
+        tactic.cut = nil
+    end
+
+    -- Reserve one nearby support player for a stationary pick. Vacate the slot
+    -- once the carrier moves, then let the picker return to the offense.
+    local pick = tactic.picker
+    if pick and (now >= tactic.pickEnds or tactic.pickCarrier ~= carrierID
+            or distanceSquared(carrier.x, carrier.z, tactic.pickStartX, tactic.pickStartZ) > 12) then
+        tactic.picker, tactic.nextPick, pick = nil, now + 3, nil
+    end
+    if not pick and defender and pressure > 1 and pressure < 3.4 and distance > 7 and distance < 21
+            and now >= (tactic.nextPick or 0) then
+        local best = 36
+        for _, identifier in ipairs(match.teams[team]) do
+            local player = match.squad[identifier]
+            if identifier ~= carrierID and player.role == "M" then
+                local d = distanceSquared(player.x, player.z, defender.x, defender.z)
+                if d < best then pick, best = identifier, d end
+            end
+        end
+        if pick then
+            local side = carrier.x < 0 and -1 or 1
+            tactic.picker, tactic.pickCarrier, tactic.pickEnds = pick, carrierID, now + 1.05
+            tactic.pickStartX, tactic.pickStartZ = carrier.x, carrier.z
+            tactic.pickX, tactic.pickZ = defender.x + side*1.22, defender.z - inside*.58
+        end
+    end
+    if pick then
+        local reserved = ai.intents[pick]
+        move(reserved, tactic.pickX, tactic.pickZ)
+        reserved.lookX, reserved.lookZ = ball.x, ball.z
+        reserved.role = "PICK"
+    end
+
+    if match.pending or match.flight or carrier.anim and carrier.anim.action then return end
+    if now < (tactic.nextAction or 0) then return end
+    local shotRange = planDistance(carrier.x, carrier.z, cx, goal.z)
+    local keeper = match.squad[match.keepers[3 - team]]
+    local shotSide = keeper.x >= cx and -1 or 1
+    local shootingAngle = distance / math.max(1, shotRange)
+    if shotRange < 15 and distance > 2.6 and shootingAngle > .49
+            and (pressure > 2.15 or shotRange < 7.4) then
+        intent.action = "shoot"
+        intent.aim = vec3(cx + goal.halfWidth*.66*shotSide, goalHeight(goal)*.66, goal.z)
+        tactic.nextAction = now + .72
+    elseif defender and pressure < 2.6 and distance < 23 then
+        local side = defender.x <= carrier.x and 1 or -1
+        local nextX = carrier.x + side * 3.1
+        local nextZ = carrier.z + approachZ * 3.3
+        if match.mode ~= "SWING" and math.abs(nextX) < match.field.halfWidth - 1.5
+                and now >= (tactic.nextDodge or 0) then
+            move(intent, nextX, nextZ)
+            intent.action, intent.moveX, intent.moveZ = "dodge", side*.79, -approachZ*.61
+            tactic.nextDodge, tactic.nextAction = now + 1.4, now + .38
+        end
+    end
+    if not intent.action and (pressure < 3.8 or distance < 25 or match.mode == "SWING") then
+        local target, score = AI.passTarget(match, carrierID, match.mode == "SWING")
+        if target and score > 2.5 then
+            intent.action, intent.target = "pass", target
+            tactic.nextAction = now + .68
+        end
+    end
+end
+
+function AI.canCheck(match, checkerID, carrierID)
+    local checker, carrier = match.squad[checkerID], match.squad[carrierID]
+    if not checker or not carrier or checker.team == carrier.team or checker.role == "G"
+            or carrier.role == "G" or match.carrier ~= carrierID or match.flight
+            or match.phase ~= "LIVE" then return false end
+    local dx, dz = checker.x - carrier.x, checker.z - carrier.z
+    local distance = dx*dx + dz*dz
+    if distance > (checker.role == "D" and 1.74 or 1.42)^2 or distance < .08 then return false end
+    local yaw = math.rad(carrier.yaw or 0)
+    return (-math.sin(yaw)*dx - math.cos(yaw)*dz) / math.sqrt(distance) > -.45
+end
+
+local function chooseMatchups(match, ai, team, ownGoal, carrier)
+    local tactic = ai.tactics[team]
+    local marks, used = {}, {}
+    local opposition = match.teams[3 - team]
+    local gx = goalX(ownGoal)
+    for _, identifier in ipairs(match.teams[team]) do
+        local player = match.squad[identifier]
+        if player.role == "D" or player.role == "M" then
+            local best, score = nil, math.huge
+            for _, otherID in ipairs(opposition) do
+                local other = match.squad[otherID]
+                if not used[otherID] and other.role ~= "G" and other.role ~= "D" then
+                    local candidate = planDistance(player.x, player.z, other.x, other.z)
+                        + planDistance(other.x, other.z, gx, ownGoal.z)*.16
+                    if tactic.mark[identifier] == otherID then candidate = candidate - 2 end
+                    if player.role == "D" and other.role == "M" then candidate = candidate + 2.8 end
+                    if candidate < score then best, score = otherID, candidate end
+                end
+            end
+            if best then marks[identifier], used[best] = best, true end
+        end
+    end
+    -- Preserve the settled matchup on routine passes, but orient on the ball.
+    local primary, primaryScore = nil, math.huge
+    if carrier and carrier.role ~= "G" then
+        for identifier, mark in pairs(marks) do
+            local defender = match.squad[identifier]
+            local candidate = planDistance(defender.x, defender.z, carrier.x, carrier.z)
+            if mark == carrier.id then candidate = candidate - 2.4 end
+            if tactic.primary == identifier then candidate = candidate - .85 end
+            if candidate == primaryScore and identifier < primary then candidate = candidate - .001 end
+            if candidate < primaryScore then primary, primaryScore = identifier, candidate end
+        end
+    end
+    tactic.mark, tactic.primary = marks, primary
+    return tactic
+end
+
+local function coordinateSlide(match, tactic, goal, carrier)
+    local primary = tactic.primary and match.squad[tactic.primary]
+    local gx = goalX(goal)
+    if not carrier or not primary then
+        tactic.firstSlide, tactic.secondSlide = nil, nil
+        return
+    end
+    local distance = planDistance(carrier.x, carrier.z, gx, goal.z)
+    local fx, fz = unit(gx-carrier.x, goal.z-carrier.z)
+    local defenderX, defenderZ = primary.x-carrier.x, primary.z-carrier.z
+    local goalSide = defenderX*fx + defenderZ*fz
+    local miss = math.abs(defenderX*fz - defenderZ*fx)
+    local danger = distance < 13 and (goalSide < .35 or miss > 1.8) and (carrier.speed > .9 or distance < 8)
+    if not danger then
+        tactic.firstSlide, tactic.secondSlide = nil, nil
+        return
+    end
+
+    local first, firstScore = nil, math.huge
+    for identifier in pairs(tactic.mark) do
+        local defender = match.squad[identifier]
+        if identifier ~= primary.id then
+            local cost = planDistance(defender.x, defender.z, carrier.x + fx*1.4, carrier.z + fz*1.4)
+            cost = cost + planDistance(defender.x, defender.z, gx, goal.z)*.22
+            if identifier == tactic.firstSlide then cost = cost - 1.35 end
+            if cost < firstScore or cost == firstScore and identifier < first then
+                first, firstScore = identifier, cost
+            end
+        end
+    end
+    tactic.firstSlide = first
+
+    local second, secondScore = nil, math.huge
+    local vacated = first and match.squad[tactic.mark[first]]
+    if vacated then
+        for identifier in pairs(tactic.mark) do
+            if identifier ~= primary.id and identifier ~= first then
+                local defender = match.squad[identifier]
+                local cost = planDistance(defender.x, defender.z, vacated.x, vacated.z)
+                if identifier == tactic.secondSlide then cost = cost - .65 end
+                if cost < secondScore or cost == secondScore and identifier < second then
+                    second, secondScore = identifier, cost
+                end
+            end
+        end
+    end
+    tactic.secondSlide = second
+end
+
+local function defend(match, ai, snapshot, team)
+    local goal = match.goalsByTeam[3 - team]
+    local gx = goalX(goal)
+    local ball = snapshot.ball
+    local carrierID = match.carrier
+    local carrier = carrierID and match.squad[carrierID]
+    local tactic = chooseMatchups(match, ai, team, goal, carrier)
+    coordinateSlide(match, tactic, goal, carrier)
+    local onBall = tactic.firstSlide or tactic.primary
+    local inside = goal.z < 0 and 1 or -1
+    local offense = ai.tactics[3 - team]
+
+    -- A defender arriving at an established pick hands the matchup to help.
+    local picker = offense.picker and match.squad[offense.picker]
+    if picker and carrier and onBall and not tactic.firstSlide
+            and planDistance(picker.x, picker.z, offense.pickX, offense.pickZ) < .7 then
+        local held = match.squad[onBall]
+        if planDistance(held.x, held.z, picker.x, picker.z) < 1.35 then
+            for _, identifier in ipairs(match.teams[team]) do
+                if tactic.mark[identifier] == picker.id and identifier ~= onBall then
+                    tactic.mark[onBall], tactic.mark[identifier] = picker.id, carrier.id
+                    tactic.primary, onBall = identifier, identifier
+                    break
+                end
+            end
+        end
+    end
+
+    for _, identifier in ipairs(match.teams[team]) do
+        local player = match.squad[identifier]
+        local intent = ai.intents[identifier]
+        local mark = tactic.mark[identifier]
+        if player.role == "G" then
+            moveKeeper(match, player, intent, ball)
+        elseif carrier and identifier == onBall then
+            local fx, fz = unit(gx-carrier.x, goal.z-carrier.z, -inside)
+            local spacing = identifier == tactic.firstSlide and 1.48 or 1.26
+            move(intent, carrier.x + fx*spacing, carrier.z + fz*spacing)
+            intent.lookX, intent.lookZ = carrier.x, carrier.z
+            intent.role = identifier == tactic.firstSlide and "FIRST SLIDE" or "BALL PRESSURE"
+            local gap = planDistance(player.x, player.z, carrier.x, carrier.z)
+            intent.speed = gap < 3.4 and 4.4 or 7.2
+            if AI.canCheck(match, identifier, carrierID) and ai.elapsed >= (tactic.nextCheck or 0) then
+                intent.action, intent.target = "check", carrierID
+                tactic.nextCheck = ai.elapsed + .72
+            end
+        elseif mark then
+            if identifier == tactic.secondSlide then mark = tactic.mark[tactic.firstSlide] end
+            if identifier == tactic.primary and tactic.firstSlide and tactic.secondSlide then
+                mark = tactic.mark[tactic.secondSlide]
+            end
+            local assignment = match.squad[mark]
+            local towardX, towardZ = unit(gx-assignment.x, goal.z-assignment.z)
+            local gap = identifier == tactic.secondSlide and .94 or 1.76
+            local help = (assignment.x * ball.x < 0) and .20 or .1
+            local x = assignment.x + towardX*gap + (ball.x-assignment.x) * help
+            local z = assignment.z + towardZ*gap
+            if match.flight and match.flight.kind == "pass" and match.flight.to == mark then
+                x, z = x + (ball.x-x)*.31, z + (ball.z-z)*.31
+                intent.role = "DENY PASS"
+            else
+                intent.role = identifier == tactic.secondSlide and "SECOND SLIDE"
+                    or identifier == tactic.primary and "RECOVER" or "MATCHUP"
+            end
+            move(intent, x, z)
+            intent.lookX, intent.lookZ = ball.x, ball.z
+        else
+            local support = clamp((ball.z-goal.z)*inside + 9, 32, match.field.halfLength*1.48)
+            move(intent, player.homeX + ball.x*.13, goal.z + support*inside)
+            intent.lookX, intent.lookZ = ball.x, ball.z
+            intent.role = "RIDE"
+        end
+    end
+end
+
+local function assignLoose(match, ai, snapshot, team)
+    local ball = snapshot.ball
+    local velocity = snapshot.velocity or vec3()
+    local x, z = ball.x + velocity.x*.16, ball.z + velocity.z*.16
+    local best, second, d1, d2 = nil, nil, math.huge, math.huge
+    for _, identifier in ipairs(match.teams[team]) do
+        local player = match.squad[identifier]
+        local distance = distanceSquared(player.x, player.z, x, z)
+        if player.role == "G" then
+            local ownGoal = match.goalsByTeam[3 - team]
+            if distanceSquared(goalX(ownGoal), ownGoal.z, x, z) > 6.4 then distance = math.huge end
+        end
+        if distance < d1 then
+            second, d2 = best, d1
+            best, d1 = identifier, distance
+        elseif distance < d2 then
+            second, d2 = identifier, distance
+        end
+    end
+    if best then
+        local chaser = match.squad[best]
+        local intent = ai.intents[best]
+        local dx, dz = unit(x-chaser.x, z-chaser.z, 1)
+        move(intent, x-dx*.37, z-dz*.37)
+        intent.lookX, intent.lookZ = x, z
+        intent.role = "GROUND BALL"
+        if ball.y < .34 and distanceSquared(chaser.x,chaser.z,ball.x,ball.z) < 1.35^2 then
+            intent.action = "scoop"
+        end
+    end
+    if second and d2 < 80 and match.squad[second].role ~= "G" then
+        local support = match.squad[second]
+        local sx, sz = unit(support.x-x, support.z-z, 1)
+        local intent = ai.intents[second]
+        move(intent, x + sx*3, z + sz*3)
+        intent.role = "GROUND COVER"
+    end
+end
+
+local function gait(time, grip, shaft, torso, crouch, roll, freeHand)
+    return {
+        time=time, grip=grip, shaft=shaft, torso=torso,
+        crouch=crouch, roll=roll, freeHand=freeHand or 0
+    }
+end
+
+function AI.registerAnimations()
+    local clips = PolyLax.AnimationController.clips
+    if clips.matchCheck then return end
+    clips.matchCheck = {
+        duration=.37, eventTime=.17, event="check",
+        poses={
+            gait(.09, vec3(.35,.69,-.18), vec3(.92,.27,.12), vec3(-5,-20,-5), .11, -14),
+            gait(.17, vec3(.34,.62,-.54), vec3(.46,.22,-.86), vec3(-16,13,5), .12, 8),
+            gait(.25, vec3(.28,.61,-.34), vec3(.69,.40,-.42), vec3(-9,4,1), .08, 4)
+        }
+    }
+    for _, side in ipairs({-1,1}) do
+        local sideName = side < 0 and "Left" or "Right"
+        clips["saveHigh"..sideName] = {
+            duration=.46,
+            poses={
+                gait(.09, vec3(.20*side,.76,-.29), vec3(.68*side,.79,-.14), vec3(-4,11*side,-5*side), .07, -12*side, .15),
+                gait(.17, vec3(.37*side,.93,-.38), vec3(.72*side,.73,-.08), vec3(-8,16*side,-11*side), .10, -20*side, .28),
+                gait(.30, vec3(.27*side,.72,-.30), vec3(.67*side,.74,-.13), vec3(-2,9*side,-5*side), .04, -6*side, .12)
+            }
+        }
+        clips["saveLow"..sideName] = {
+            duration=.50,
+            poses={
+                gait(.08, vec3(.24*side,.52,-.24), vec3(.73*side,.14,-.45), vec3(-12,9*side,-9*side), .15, -19*side, .20),
+                gait(.17, vec3(.39*side,.35,-.38), vec3(.80*side,-.53,-.30), vec3(-23,12*side,-19*side), .35, -19*side, .45),
+                gait(.34, vec3(.25*side,.60,-.32), vec3(.82*side,.54,-.03), vec3(-8,6*side,-7*side), .12, -11*side, .13)
+            }
+        }
+    end
+end
+
+local function saveStyle(keeper, sample)
+    local relative = keeper.rig.body:inverseTransformPoint(sample)
+    local side = relative.x < 0 and "Left" or "Right"
+    local level = sample.y < .91 and "Low" or "High"
+    return "save" .. level .. side
+end
+
+local function watchShot(match, ai)
+    local flight = match.flight
+    if not flight or flight.kind ~= "shot" then
+        for _, index in ipairs(match.keepers) do ai.goalies[index] = nil end
+        return
+    end
+    local shooter = match.squad[flight.from]
+    local keeperID = match.keepers[3 - shooter.team]
+    local keeper = match.squad[keeperID]
+    local goal = match.goalsByTeam[shooter.team]
+    local ball, velocity = match.ball.position, match.ballVelocity
+    if not velocity or math.abs(velocity.z) < 1 then return end
+    local travelTime = (keeper.z - ball.z) / velocity.z
+    if travelTime < -.08 or travelTime > 1.8 then return end
+    local memory = ai.goalies[keeperID]
+    if not memory or memory.flight ~= flight then
+        local reflexes = keeper.reflexes or .76
+        local anticipation = keeper.anticipation or .72
+        local distance = math.abs(goal.z-ball.z)
+        local delay = clamp(.29 - reflexes*.18 - anticipation*.025 + distance*.002, .085, .31)
+        memory = {flight=flight, ready=ai.elapsed+delay}
+        ai.goalies[keeperID] = memory
+    end
+    local wait = math.max(0, travelTime)
+    local intercept = vec3(ball.x + velocity.x*wait,
+        ball.y + velocity.y*wait - GRAVITY*.5*wait*wait, keeper.z)
+    if math.abs(intercept.x-goalX(goal)) > goal.halfWidth + .85
+            or intercept.y > goalHeight(goal) + .65 or intercept.y < -.15 then return end
+    local intent = ai.intents[keeperID]
+    if ai.elapsed >= memory.ready then
+        moveKeeper(match, keeper, intent, intercept, wait)
+        intent.lookX, intent.lookZ = ball.x, ball.z
+        if not memory.actionSent and wait < .42 then
+            memory.style = saveStyle(keeper, intercept)
+            memory.actionSent = true
+            intent.action, intent.style = "save", memory.style
+        end
+    end
+end
+
+local function segmentSphere(a, b, center, radius)
+    local difference, offset = b-a, a-center
+    local squaredRadius = radius*radius
+    if offset:dot(offset) <= squaredRadius then return 0 end
+    local lengthSquared = difference:dot(difference)
+    if lengthSquared < 1e-10 then return nil end
+    local projection = offset:dot(difference)
+    if projection >= 0 then return nil end
+    local discriminant = projection*projection - lengthSquared*(offset:dot(offset)-squaredRadius)
+    if discriminant < 0 then return nil end
+    local t = (-projection - math.sqrt(discriminant))/lengthSquared
+    if t >= 0 and t <= 1 then return t end
+end
+
+function AI.sweepKeeper(match, keeperID, from, to, velocity)
+    local keeper = match.squad[keeperID]
+    if not keeper then return nil end
+    local rate = keeper.positioning or .78
+    local hands = keeper.handSpeed or .75
+    local memory = match.ai and match.ai.goalies[keeperID]
+    local ready = memory and match.ai.elapsed >= memory.ready
+    local best, caught, center = nil, false, nil
+
+    local function consider(point, radius, canCatch)
+        local time = segmentSphere(from, to, point, radius + BALL_RADIUS)
+        if time and (not best or time < best) then
+            best, caught, center = time, canCatch, point
+        end
+    end
+
+    if ready and keeper.rig.pocket then
+        local head = keeper.rig.pocket.worldPosition
+        local gap = memory.style and .26 or .18
+        local maxCatchSpeed = 14.5 + hands*10 + rate*3
+        consider(head, gap + hands*.09, velocity:len() <= maxCatchSpeed)
+        local stick = keeper.rig.stickRoot
+        if stick then
+            consider(stick:transformPoint(vec3(0,.35,0)), .08, false)
+            consider(stick:transformPoint(vec3(0,.01,0)), .08, false)
+        end
+    end
+    local block = .33 + rate*.10
+    for _, y in ipairs({.55, .92, 1.27, 1.61}) do
+        consider(vec3(keeper.x,y,keeper.z), block, false)
+    end
+    if not best then return nil end
+    local point = from + (to-from)*best
+    local normal = (point-center):normalize()
+    local outward = keeper.team == 1 and -1 or 1
+    local rebound = vec3(
+        velocity.x*.18 + normal.x*2.8,
+        clamp(math.abs(velocity.y)*.24 + .9, .65, 3.6),
+        outward*math.max(2.6, math.abs(velocity.z)*.28)
+    )
+    return {
+        t=best, time=best, position=point, caught=caught, velocity=rebound,
+        style=memory and memory.style or saveStyle(keeper, point)
+    }
+end
+
+local function keepOutlet(match, ai)
+    local id = match.carrier
+    local holder = id and match.squad[id]
+    if not holder or holder.role ~= "G" or match.pending or match.flight then return end
+    local intent = ai.intents[id]
+    local tactic = ai.tactics[holder.team]
+    intent.role = "OUTLET"
+    if ai.elapsed < (tactic.nextOutlet or 0) then return end
+    local target = AI.passTarget(match, id, false)
+    if target then
+        intent.action, intent.target = "pass", target
+        tactic.nextOutlet = ai.elapsed + .9
+    else
+        local goal = match.goalsByTeam[3 - holder.team]
+        local inside = goal.z < 0 and 1 or -1
+        move(intent, holder.x < 0 and -3.6 or 3.6, goal.z + inside*3.8)
+    end
+end
+
+function AI.update(match, dt)
+    local ai = match.ai or AI.new()
+    match.ai = ai
+    ai.elapsed = ai.elapsed + dt
+    AI.registerAnimations()
+    for id, player in ipairs(match.squad) do
+        if not ai.intents[id] then ai.intents[id] = {x=player.x, z=player.z} end
+        local intent = ai.intents[id]
+        intent.action, intent.target, intent.aim, intent.style = nil, nil, nil, nil
+    end
+    if match.phase ~= "LIVE" then
+        ai.nextTick = ai.elapsed
+        if ai.phase == "LIVE" then ai.goalies = {} end
+        ai.phase = match.phase
+        return ai.intents
+    end
+    if ai.elapsed >= ai.nextTick or ai.phase ~= match.phase then
+        local snapshot = updateAwareness(match, ai)
+        for _, intent in ipairs(ai.intents) do intent.speed = nil end
+        ai.phase = match.phase
+        ai.nextTick = ai.elapsed + TACTICAL_INTERVAL
+        local attacking = snapshot.possessionTeam
+        if attacking then ai.lastTeam = attacking end
+        attacking = attacking or ai.lastTeam or 1
+        offBallAttack(match, ai, snapshot, attacking)
+        defend(match, ai, snapshot, 3-attacking)
+        if snapshot.loose then
+            assignLoose(match, ai, snapshot, 1)
+            assignLoose(match, ai, snapshot, 2)
+        elseif snapshot.possessionTeam then
+            keepOutlet(match, ai)
+        end
+        for _, intent in ipairs(ai.intents) do restrict(match, intent) end
+    end
+    watchShot(match, ai)
+    return ai.intents
+end
