@@ -40,17 +40,30 @@ end
 
 local function newStats()
     return {goals=0, score=0, shots=0, shotsOnGoal=0, saves=0, passes=0,
-        completions=0, groundBalls=0, faceoffs=0, checks=0, turnovers=0}
+        completions=0, groundBalls=0, faceoffs=0, checks=0, turnovers=0,
+        pokes=0, slaps=0, bodyChecks=0, interceptions=0, forcedTurnovers=0, fouls=0}
+end
+
+function Match.recordStat(match, index, key, amount)
+    local player = match.squad[index]
+    if not player then return end
+    local team = match.stats[player.team]
+    local increment = amount or 1
+    player.stats[key] = (player.stats[key] or 0) + increment
+    team[key] = (team[key] or 0) + increment
 end
 
 local function matchRules(options)
     options = options or {}
+    local ageGroup, bodyContact = P.Defense.configure(options)
     return {
         name = options.name or "Arcade testing",
         periods = math.floor(clamp(tonumber(options.periods) or 4, 1, 8)),
         periodLength = clamp(tonumber(options.periodLength) or 90, 1, 900),
         intermissionTime = clamp(tonumber(options.intermissionTime) or 2.4, .4, 12),
-        goalTime = clamp(tonumber(options.goalTime) or 1.7, .6, 5)
+        goalTime = clamp(tonumber(options.goalTime) or 1.7, .6, 5),
+        foulTime = clamp(tonumber(options.foulTime) or 1.05, .4, 5),
+        ageGroup = ageGroup, bodyContact = bodyContact
     }
 end
 
@@ -117,13 +130,14 @@ local function startFaceoff(match)
     match.mode, match.clearTime = "SET", 0
     match.pending, match.flight, match.loose, match.carrier = nil, nil, nil, nil
     match.scoopPlayer, match.lastTouch, match.inNet = nil, nil, nil
+    match.foul = nil
     match.faceoff = {}
     match.controlled = userPlayer
     local reset = P.AnimationController.reset
     for _, player in ipairs(match.squad) do
         player.x, player.z = player.homeX, player.homeZ
         player.vx, player.vz, player.speed, player.turn = 0, 0, 0, 0
-        player.dodge, player.checkTarget, player.checkCooldown = nil, nil, 0
+        player.dodge, player.check, player.checkCooldown = nil, nil, 0
         player.yaw = player.team == 1 and 0 or 180
         if player.role == "G" then player.yaw = (player.yaw + 180) % 360 end
         if player.slot == 4 then player.z = -.62 * directionFor(player.team) end
@@ -140,6 +154,7 @@ local function resetMatch(match)
     match.homeScore, match.awayScore = 0, 0
     match.period, match.clock, match.elapsed = 1, match.rules.periodLength, 0
     match.stats = {newStats(), newStats()}
+    for _, player in ipairs(match.squad) do player.stats = newStats() end
     match.ai = P.MatchAI.new()
     startFaceoff(match)
 end
@@ -172,6 +187,7 @@ function Match.new(scene, profile, homeId, awayId, rules)
         ball=makeBall(scene), marker=makeMarker(scene), squad={}, teams={{},{}}, keepers={}, rules=matchRules(rules)
     }
     P.MatchAI.registerAnimations()
+    P.Defense.registerAnimations()
     applyTeamKits(match, homeId, awayId)
     for team = 1, 2 do
         local side = directionFor(team)
@@ -183,7 +199,8 @@ function Match.new(scene, profile, homeId, awayId, rules)
             local player = {
                 id=index, team=team, slot=slot, role=spec[1], name=spec[1]..spec[2],
                 rig=rig, anim=P.AnimationController.new(rig), number=rig.numberValue,
-                homeX=spec[3] * -side, homeZ=spec[4] * side
+                homeX=spec[3] * -side, homeZ=spec[4] * side,
+                attributes=P.Defense.attributes(spec[1])
             }
             match.squad[index] = player
             match.teams[team][slot] = index
@@ -222,13 +239,9 @@ local function startDodge(player, moveX, moveZ)
     player.dodge = {x=x / length, z=z / length, time=.29}
 end
 
-local function startCheck(match, player)
-    local holder = match.carrier
-    if not holder or player.checkCooldown > 0 or
-        not P.MatchAI.canCheck(match, player.id, holder) then return end
-    if P.AnimationController.play(player.anim, "matchCheck") then
-        player.checkTarget, player.checkCooldown = holder, .8
-    end
+local function startCheck(match, player, style)
+    if player.check then return end
+    player.check = P.Defense.request(match, player, style)
 end
 
 local function startScoop(match, player)
@@ -290,10 +303,10 @@ function Match.command(match, action, moveX, moveZ, aim)
         match.mode, match.clearTime = "CLEAR", 4.5
         announce(match, "CLEAR THROUGH")
     elseif action == "dodge" then
-        if holder and holder.team ~= 1 then startCheck(match, player)
+        if holder and holder.team ~= 1 then startCheck(match, player, "poke")
         else startDodge(player, moveX, moveZ) end
-    elseif action == "check" or action == "poke" then
-        startCheck(match, player)
+    elseif action == "check" or P.Defense.checks[action] then
+        startCheck(match, player, action)
     elseif action == "scoop" then
         startScoop(match, player)
     elseif action == "shoot" then
@@ -367,10 +380,11 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
             local target = pending.to and match.squad[pending.to] or goal[player.team]
             lookX, lookZ = target.x - player.x, target.z - player.z
         elseif match.scoopPlayer == player.id or
-            flight and flight.to == player.id and flight.catchStarted then
+            flight and (flight.to == player.id and flight.catchStarted or
+                flight.interceptor and flight.interceptor.id == player.id) then
             lookX, lookZ = ball.x - player.x, ball.z - player.z
-        elseif player.checkTarget then
-            local target = match.squad[player.checkTarget]
+        elseif player.check then
+            local target = match.squad[player.check.target]
             lookX, lookZ = target.x - player.x, target.z - player.z
         elseif intent and intent.lookX and intent.lookZ then
             lookX, lookZ = intent.lookX - player.x, intent.lookZ - player.z
@@ -404,14 +418,13 @@ local function release(match, pending)
     local player = match.squad[pending.from]
     local origin = pocket(player)
     local flight = {kind=pending.kind, from=pending.from, team=player.team, origin=origin, time=0}
-    local stats = match.stats[player.team]
     if flight.kind == "pass" then
         local target = match.squad[pending.to]
         local length = distance(target.x - player.x, target.z - player.z)
         flight.to = target.id
         flight.duration = clamp(length / 23, .35, 2.4)
         flight.arc = clamp(length * .060, .18, 1.25)
-        stats.passes = stats.passes + 1
+        Match.recordStat(match, player.id, "passes")
         match.ballVelocity = (pocket(target) - origin) / flight.duration
     else
         local goal = match.goalsByTeam[player.team]
@@ -424,7 +437,7 @@ local function release(match, pending)
         flight.goal = goal
         flight.onTarget = math.abs(x - goal.x) < goal.halfWidth - ballRadius
             and y >= ballRadius and y < goal.top - ballRadius
-        stats.shots = stats.shots + 1
+        Match.recordStat(match, player.id, "shots")
         match.ballVelocity = flight.velocity
     end
     match.lastTouch, match.carrier = player.team, nil
@@ -444,17 +457,30 @@ local function planCatch(match, dt)
 end
 
 local function completeCheck(match, player)
-    local holder = match.carrier and match.squad[match.carrier]
-    local target = player.checkTarget
-    player.checkTarget = nil
-    if not holder or holder.id ~= target or not P.MatchAI.canCheck(match, player.id, holder.id) then return end
-    local x, z = holder.x - player.x, holder.z - player.z
-    local length = math.max(.30, distance(x, z))
-    local velocity = vec3(holder.vx * .24 + x * 4 / length, .65, holder.vz * .24 + z * 4 / length)
-    freeBall(match, pocket(holder), velocity, player.team)
-    match.stats[player.team].checks = match.stats[player.team].checks + 1
-    match.stats[holder.team].turnovers = match.stats[holder.team].turnovers + 1
-    announce(match, "BALL KNOCKED LOOSE")
+    local request = player.check
+    player.check = nil
+    local result, position, velocity = P.Defense.contact(match, player, request)
+    local target = match.squad[request.target]
+    if result == "loose" then
+        freeBall(match, position, velocity, player.team)
+        Match.recordStat(match, player.id, "checks")
+        Match.recordStat(match, player.id, P.Defense.checks[request.style].stat)
+        Match.recordStat(match, player.id, "forcedTurnovers")
+        Match.recordStat(match, target.id, "turnovers")
+        announce(match, P.Defense.checks[request.style].name .. " · BALL LOOSE")
+    elseif result == "foul" then
+        local oldHolder = match.carrier
+        if oldHolder and match.squad[oldHolder].team == player.team then
+            Match.recordStat(match, oldHolder, "turnovers")
+        end
+        Match.recordStat(match, player.id, "fouls")
+        match.pending, match.flight, match.loose, match.scoopPlayer = nil, nil, nil, nil
+        local recipient = oldHolder and match.squad[oldHolder].team == target.team and oldHolder or target.id
+        match.foul = {recipient=recipient, oldHolder=oldHolder}
+        match.phase, match.phaseTime = "FOUL", 0
+        match.ballVelocity = vec3()
+        announce(match, "ILLEGAL BODY CHECK", match.rules.foulTime)
+    end
 end
 
 local function act(match, intents)
@@ -465,7 +491,8 @@ local function act(match, intents)
             if action == "pass" then startPass(match, player, intent.target)
             elseif action == "shoot" then startShot(match, player, intent.aim)
             elseif action == "dodge" then startDodge(player, intent.moveX, intent.moveZ)
-            elseif action == "check" then startCheck(match, player)
+            elseif action == "check" or P.Defense.checks[action] then
+                startCheck(match, player, action)
             elseif action == "scoop" then startScoop(match, player)
             elseif action == "save" and intent.style then
                 P.AnimationController.play(player.anim, intent.style)
@@ -483,11 +510,9 @@ local function trySave(match, flight, previous, position, velocity, hit)
         or (position.z - previous.z) * goal.attackSign <= 0 then return false end
     local save = P.MatchAI.sweepKeeper(match, id, previous, position, velocity)
     if not save or hit and hit.time < save.t then return false end
-    local teamStats = match.stats[keeper.team]
-    local offense = match.stats[flight.team]
     if flight.onTarget then
-        teamStats.saves = teamStats.saves + 1
-        offense.shotsOnGoal = offense.shotsOnGoal + 1
+        Match.recordStat(match, keeper.id, "saves")
+        Match.recordStat(match, flight.from, "shotsOnGoal")
     end
     if save.style then P.AnimationController.play(keeper.anim, save.style) end
     if save.caught then
@@ -502,9 +527,9 @@ end
 
 local function score(match, flight, hit)
     local team = flight.team
-    local stats = match.stats[team]
-    stats.goals, stats.shotsOnGoal = stats.goals + 1, stats.shotsOnGoal + 1
-    stats.score = stats.goals
+    Match.recordStat(match, flight.from, "goals")
+    Match.recordStat(match, flight.from, "shotsOnGoal")
+    Match.recordStat(match, flight.from, "score")
     match.homeScore, match.awayScore = match.stats[1].goals, match.stats[2].goals
     match.flight, match.loose, match.carrier = nil, nil, nil
     local fixed = P.GoalPhysics.capture(flight.goal, hit.position)
@@ -522,14 +547,18 @@ local function updateFlight(match, dt, catchIndex)
     local previous = match.ball.position
     if flight.kind == "pass" then
         local progress = flight.time / flight.duration
-        local target = pocket(match.squad[flight.to])
-        local position = flight.origin + (target - flight.origin) * progress
-            + vec3(0, math.sin(progress * math.pi) * flight.arc, 0)
+        local position = P.Defense.passPoint(match, flight, flight.time)
         match.ball.position, match.ballVelocity = position, (position - previous) / dt
-        if catchIndex == flight.to then
+        local intercepted = P.Defense.intercept(match, flight, previous, position)
+        if intercepted then
+            attach(match, intercepted, true)
+            Match.recordStat(match, intercepted, "interceptions")
+            Match.recordStat(match, intercepted, "forcedTurnovers")
+            Match.recordStat(match, flight.from, "turnovers")
+            announce(match, "INTERCEPTION")
+        elseif catchIndex == flight.to then
             attach(match, flight.to, match.controlled == flight.from)
-            local stats = match.stats[flight.team]
-            stats.completions = stats.completions + 1
+            Match.recordStat(match, flight.from, "completions")
         elseif progress >= 1 then
             freeBall(match, position, vec3(0, -.6, 0), flight.team)
             announce(match, "PASS DROPPED")
@@ -602,8 +631,7 @@ local function updateLoose(match, dt, scoopIndex)
         if position.y <= .34 and contact.y <= .75
             and distance(position.x - contact.x, position.z - contact.z) <= .79 then
             attach(match, scoopIndex, match.controlled == scoopIndex)
-            local stats = match.stats[player.team]
-            stats.groundBalls = stats.groundBalls + 1
+            Match.recordStat(match, player.id, "groundBalls")
             announce(match, "GROUND BALL")
         end
     end
@@ -664,7 +692,7 @@ local function faceoff(match, dt)
         local winner = team == 1 and first or second
         attach(match, winner.id, true)
         match.phase, match.phaseTime = "LIVE", 0
-        match.stats[team].faceoffs = match.stats[team].faceoffs + 1
+        Match.recordStat(match, winner.id, "faceoffs")
         announce(match, (team == 1 and match.homeTeam.short or match.awayTeam.short) .. " FACEOFF WIN")
     end
 end
@@ -680,6 +708,7 @@ local function live(match, dt, moveX, moveZ)
     local intents = P.MatchAI.update(match, dt)
     act(match, intents)
     planCatch(match, dt)
+    if match.flight then P.Defense.prepareIntercept(match, match.flight) end
     if match.loose then startScoop(match, match.squad[match.controlled]) end
     movePlayers(match, dt, moveX, moveZ, intents)
     local animation = P.AnimationController
@@ -690,10 +719,11 @@ local function live(match, dt, moveX, moveZ)
             speed=player.speed, turn=player.turn, possessed=match.carrier==index,
             scoopPoint=match.scoopPlayer==index and match.ball.position or nil
         })
-        if player.checkTarget then
+        if player.check then
             if event == "check" then completeCheck(match, player)
-            elseif player.anim.action ~= "matchCheck" then player.checkTarget = nil end
+            elseif player.anim.action ~= player.check.clip then player.check = nil end
         end
+        if match.phase ~= "LIVE" then return end
         if event == "release" and match.pending and match.pending.from == index then
             release(match, match.pending)
         elseif event == "catch" then
@@ -721,6 +751,20 @@ function Match.update(match, dt, moveX, moveZ)
         match.elapsed = match.elapsed + liveTime
         if liveTime > 0 then live(match, liveTime, moveX or 0, moveZ or 0) end
         if match.clock <= 0 and match.phase == "LIVE" then finishPeriod(match) end
+    elseif match.phase == "FOUL" then
+        match.phaseTime = match.phaseTime + dt
+        if match.phaseTime >= match.rules.foulTime then
+            local foul, animation = match.foul, P.AnimationController
+            match.foul = nil
+            if foul.oldHolder and foul.oldHolder ~= foul.recipient then
+                animation.reset(match.squad[foul.oldHolder].anim)
+            end
+            animation.reset(match.squad[foul.recipient].anim)
+            attach(match, foul.recipient, true)
+            match.phase, match.phaseTime = "LIVE", 0
+            if match.clock <= 0 then finishPeriod(match)
+            else announce(match, "POSSESSION AWARDED") end
+        end
     elseif match.phase == "INTERMISSION" or match.phase == "GOAL" then
         match.phaseTime = match.phaseTime + dt
         if match.phase == "GOAL" and match.phaseTime >= match.rules.goalTime then

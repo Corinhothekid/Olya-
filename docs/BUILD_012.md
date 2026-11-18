@@ -9,3 +9,11 @@ Changed `Main.lua`, `UI.lua`, `CameraController.lua`, `Gameplay.lua`, and `FullM
 In Codea Legacy Craft, open Practice. Hold Sprint with one finger while walking with the joystick. Hold Shoot with a second finger, drag, and release. Cycle the camera through Dynamic, Broadcast, and Player Lock and test both zoom buttons. In Broadcast verify both goals and the full field remain visible on a phone in portrait. Start Full Game and play its existing faceoff.
 
 Lua mocks passed three HUD sizes and six camera sizes, plus the creator, simultaneous joystick/sprint, hold-to-aim and mode entry checks. Native Codea rendering and touch response remain to be checked.
+
+## Stage 2 · Checks, interceptions, and loose balls
+
+Added `Defense.lua` and updated `FullMatch.lua`, `MatchAI.lua`, and the tab order. Poke, Slap, and Body start distinct checks that resolve on their animation events. They account for the players' orientation, distance, pocket position, defensive ratings, ball security, and recovery. A successful check can create a live loose ball. An illegal check briefly stops play and awards possession to the victim. Faceoff interaction remains the baseline at this stage.
+
+In Full Game, approach a carrier and try each check, then chase and scoop a dislodged ball. Change `ageGroup` to `"U12"` in the FullMatch rules options for a body-contact foul test. Cross a pass lane to attempt an interception. The age/rules gates use an arcade subset of contact rules.
+
+Lua mocks passed timed check hits and misses, rear/underage body fouls, restarts, scoop recovery, swept interceptions, and a complete shortened match. iPhone input and the new check animations await device testing.

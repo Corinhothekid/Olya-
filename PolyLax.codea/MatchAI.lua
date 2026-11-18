@@ -315,14 +315,11 @@ end
 
 function AI.canCheck(match, checkerID, carrierID)
     local checker, carrier = match.squad[checkerID], match.squad[carrierID]
-    if not checker or not carrier or checker.team == carrier.team or checker.role == "G"
-            or carrier.role == "G" or match.carrier ~= carrierID or match.flight
+    if not checker or not carrier or checker.team == carrier.team
+            or match.carrier ~= carrierID or match.flight
             or match.phase ~= "LIVE" then return false end
-    local dx, dz = checker.x - carrier.x, checker.z - carrier.z
-    local distance = dx*dx + dz*dz
-    if distance > (checker.role == "D" and 1.74 or 1.42)^2 or distance < .08 then return false end
-    local yaw = math.rad(carrier.yaw or 0)
-    return (-math.sin(yaw)*dx - math.cos(yaw)*dz) / math.sqrt(distance) > -.45
+    local style = PolyLax.Defense.aiChoice(match, checker, carrier)
+    return style ~= nil, style
 end
 
 local function chooseMatchups(match, ai, team, ownGoal, carrier)
@@ -454,8 +451,9 @@ local function defend(match, ai, snapshot, team)
             intent.role = identifier == tactic.firstSlide and "FIRST SLIDE" or "BALL PRESSURE"
             local gap = planDistance(player.x, player.z, carrier.x, carrier.z)
             intent.speed = gap < 3.4 and 4.4 or 7.2
-            if AI.canCheck(match, identifier, carrierID) and ai.elapsed >= (tactic.nextCheck or 0) then
-                intent.action, intent.target = "check", carrierID
+            local canCheck, style = AI.canCheck(match, identifier, carrierID)
+            if canCheck and ai.elapsed >= (tactic.nextCheck or 0) then
+                intent.action, intent.target = style, carrierID
                 tactic.nextCheck = ai.elapsed + .72
             end
         elseif mark then
@@ -535,15 +533,7 @@ end
 
 function AI.registerAnimations()
     local clips = PolyLax.AnimationController.clips
-    if clips.matchCheck then return end
-    clips.matchCheck = {
-        duration=.37, eventTime=.17, event="check",
-        poses={
-            gait(.09, vec3(.35,.69,-.18), vec3(.92,.27,.12), vec3(-5,-20,-5), .11, -14),
-            gait(.17, vec3(.34,.62,-.54), vec3(.46,.22,-.86), vec3(-16,13,5), .12, 8),
-            gait(.25, vec3(.28,.61,-.34), vec3(.69,.40,-.42), vec3(-9,4,1), .08, 4)
-        }
-    }
+    if clips.saveHighLeft then return end
     for _, side in ipairs({-1,1}) do
         local sideName = side < 0 and "Left" or "Right"
         clips["saveHigh"..sideName] = {

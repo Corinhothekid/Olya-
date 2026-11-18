@@ -13,6 +13,7 @@
 		<string>GoalPhysics</string>
 		<string>Gameplay</string>
 		<string>Field</string>
+		<string>Defense</string>
 		<string>MatchAI</string>
 		<string>FullMatch</string>
 		<string>UI</string>
