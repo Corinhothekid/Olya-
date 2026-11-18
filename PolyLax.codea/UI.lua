@@ -1,13 +1,11 @@
--- PolyLax Build 013 | Creator and match HUD
+-- PolyLax 2.0 | Creator and match HUD
 PolyLax = PolyLax or {}
 local UI = {}
 PolyLax.UI = UI
 
-local navy = color(7, 28, 60)
-local panel = color(16, 45, 88)
-local tile = color(29, 64, 113)
-local blue = color(16, 115, 245)
-local yellow = color(255, 211, 66)
+local navy = color(12, 18, 28)
+local panel = color(17, 25, 36)
+local blue = color(54, 133, 240)
 local white = color(240, 244, 247)
 local silver = color(174, 191, 205)
 
@@ -56,10 +54,8 @@ local function fillRect(x, y, width, height, tint)
 end
 
 local function button(item, selected, size)
-    rectMode(CENTER)
-    fill(selected and yellow or tile)
-    rect(item.x, item.y, item.w, item.h)
-    label(item.label, item.x, item.y, size or 12, selected and navy or white)
+    PolyLax.Style.panel(item.x, item.y, item.w, item.h, selected, 7)
+    label(item.label, item.x, item.y, size or 12, white)
 end
 
 function UI.safeArea()
@@ -72,7 +68,8 @@ function UI.safeArea()
     }
 end
 
-function UI.creatorLayout(categories)
+function UI.creatorLayout(categories, options)
+    options = options or {}
     local w, h = WIDTH, HEIGHT
     local safe = UI.safeArea()
     local topInset, bottomInset = safe.top, safe.bottom
@@ -92,12 +89,14 @@ function UI.creatorLayout(categories)
         topBar=topBar, headerY=headerY, panelHeight=panelHeight, footerY=footerY,
         frame={bottom=panelHeight+49, top=h-topBar-9},
         leftX=left, centerX=(left+right)*.5,
-        done=box(w-safe.right-49, headerY, 82, 39, "PRACTICE"),
-        fullGame=box(w-safe.right-136, headerY, 82, 39, "FULL GAME"),
+        athlete=options.athlete, kit=options.kit,
+        home=box(left+23,footerY,46,34,options.athlete and "BACK" or "HOME","home"),
+        done=box(w-safe.right-49,headerY,82,39,options.athlete and "HOME KIT" or "PRACTICE"),
+        fullGame=box(w-safe.right-136,headerY,82,39,options.athlete and "AWAY KIT" or "FULL GAME"),
         reset=box(right-68, panelHeight+23, 136, 34, "RESET CAMERA"),
         career=box(right-171, panelHeight+23, 56, 34, "CAREER", "career"),
-        left=box(w * .25 + 10, footerY, 64, 34, "<"),
-        right=box(w * .75 - 10, footerY, 64, 34, ">"),
+        left=box(left+(right-left)*.29,footerY,48,34,"<"),
+        right=box(right-(right-left)*.20,footerY,48,34,">"),
         categories={}, options={}
     }
 
@@ -122,17 +121,22 @@ function UI.firstOption(category, selected)
     return math.max(1, math.min(selected - 2, #category.choices - 5))
 end
 
-function UI.creator(layout, category, categoryIndex, selected, firstOption, showCareer)
+function UI.creator(layout, category, categoryIndex, selected, firstOption, showCareer, options)
+    if type(showCareer) == "table" then options,showCareer = showCareer,false end
+    local athlete = layout.athlete or options and options.athlete
+    local kit = options and options.kit or layout.kit
+    local away = type(kit) == "string" and kit:lower() == "away"
     beginHud()
     fillRect(0, HEIGHT-layout.topBar, WIDTH, layout.topBar, navy)
     leftLabel("MODIFY PLAYER", layout.leftX+2, layout.headerY, WIDTH < 350 and 15 or 18, white)
-    button(layout.fullGame, true, 11)
-    button(layout.done, false, 11)
-    fillRect(0, 0, WIDTH, layout.panelHeight, navy)
-    fillRect(0, layout.panelHeight, WIDTH, 2, blue)
+    button(layout.fullGame,not athlete or away,11)
+    button(layout.done,athlete and not away,11)
+    fillRect(0,0,WIDTH,layout.panelHeight,navy)
+    fillRect(0,layout.panelHeight-5,WIDTH,5,panel)
+    fillRect(layout.leftX,layout.panelHeight-1,54,2,blue)
     leftLabel(category.label or category.key, layout.leftX+2, layout.panelHeight+23, 12, white)
     button(layout.reset, false, 11)
-    if showCareer then button(layout.career, true, 10) end
+    if showCareer and not athlete then button(layout.career,false,10) end
 
     for _, item in ipairs(layout.categories) do
         button(item, item.id == categoryIndex, item.label == "LEG SLEEVES" and 10 or 12)
@@ -146,11 +150,9 @@ function UI.creator(layout, category, categoryIndex, selected, firstOption, show
             local city, name = item.label:match("^(.*) (%S+)$")
             if city then
                 local active = index == selected
-                rectMode(CENTER)
-                fill(active and yellow or tile)
-                rect(item.x, item.y, item.w, item.h)
-                label(city, item.x, item.y + 6, 9, active and navy or silver)
-                label(name, item.x, item.y - 7, 11, active and navy or white)
+                PolyLax.Style.panel(item.x,item.y,item.w,item.h,active,7)
+                label(city,item.x,item.y+6,9,active and white or silver)
+                label(name,item.x,item.y-7,11,white)
             else
                 button(item, index == selected, 11)
             end
@@ -158,7 +160,8 @@ function UI.creator(layout, category, categoryIndex, selected, firstOption, show
             button(item, index == selected, 11)
         end
     end
-    button(layout.left, false, 16)
+    button(layout.home,false,10)
+    button(layout.left,false,16)
     button(layout.right, false, 16)
     label(tostring(selected) .. " / " .. tostring(#category.choices),
         layout.centerX, layout.footerY, 12, silver)
@@ -171,48 +174,8 @@ local muted = color(169, 190, 210)
 local sky = color(117, 204, 255)
 local warm = color(255, 217, 98)
 local red = color(251, 141, 137)
-local roundMeshes = {}
-
--- Tessellated corners preserve the opacity of the translucent surface.
-local function rounded(x, y, w, h, radius, tint, scaleFactor)
-    if w <= 0 or h <= 0 then return end
-    radius = math.min(radius,w*.5,h*.5)
-    if not mesh then
-        rectMode(CENTER)
-        fill(tint)
-        rect(x,y,w*(scaleFactor or 1),h*(scaleFactor or 1))
-        return
-    end
-    local key = string.format("%.2f,%.2f,%.2f",w,h,radius)
-    local shape = roundMeshes[key]
-    if not shape then
-        local perimeter = {}
-        for corner=0,3 do
-            local cx = (corner == 0 or corner == 3) and w*.5-radius or radius-w*.5
-            local cy = corner < 2 and h*.5-radius or radius-h*.5
-            for sub=0,4 do
-                local angle = (corner+sub*.25)*math.pi*.5
-                perimeter[#perimeter+1] = vec3(cx+math.cos(angle)*radius,cy+math.sin(angle)*radius,0)
-            end
-        end
-        local vertices, center = {}, vec3(0,0,0)
-        for index, point in ipairs(perimeter) do
-            vertices[#vertices+1] = center
-            vertices[#vertices+1] = point
-            vertices[#vertices+1] = perimeter[index % #perimeter+1]
-        end
-        shape = mesh()
-        shape.vertices = vertices
-        if (roundMeshes.count or 0) >= 120 then roundMeshes = {} end
-        roundMeshes[key] = shape
-        roundMeshes.count = (roundMeshes.count or 0) + 1
-    end
-    shape:setColors(tint)
-    pushMatrix()
-    translate(x,y)
-    if scaleFactor then scale(scaleFactor) end
-    shape:draw()
-    popMatrix()
+local function rounded(...)
+    return PolyLax.Style.rounded(...)
 end
 
 function UI.press(layout, item, id)
@@ -275,6 +238,7 @@ function UI.practiceLayout()
         zoomIn=box(right-18,header-98,36,33,"+","zoomIn"),
         zoomOut=box(right-58,header-98,36,33,"-","zoomOut"),
         camera=box(right-80-cameraW*.5,header-98,cameraW,33,"CAMERA","camera"),
+        pause=box(left+25,header-98,50,33,"PAUSE","pause"),
         sprint=box(joyX,joyY+joyRadius+16,math.min(78,joyMaxX-left-6),28,"SPRINT","sprint")
     }
 
@@ -346,6 +310,7 @@ local icons = {
     dodge={{-7,-5,-2,3},{-2,3,2,-2},{2,-2,8,5},{8,5,4,5},{8,5,8,1}},
     slap={{-8,6,-2,3},{-2,3,7,-6},{-7,-3,-3,-3},{-5,-5,-5,-1},{2,6,7,6}},
     sprint={{-7,6,-1,0},{-1,0,-7,-6},{1,6,7,0},{7,0,1,-6}},
+    pause={{-2,-6,-2,6},{2,-6,2,6}},
     camera={{-8,5,4,5},{4,5,4,-5},{4,-5,-8,-5},{-8,-5,-8,5},{4,2,8,5},{8,5,8,-5},{8,-5,4,-2}},
     zoomIn={{-5,0,5,0},{0,-5,0,5}},
     zoomOut={{-5,0,5,0}}
@@ -380,10 +345,14 @@ local function chip(layout, item, name, symbol, emphatic)
     end
 end
 
-local primaryBlue = color(30,104,217,245)
-local primaryRed = color(194,47,63,245)
-local primaryOff = color(41,53,68,212)
-local primaryRim = color(168,193,211,177)
+local primaryBlue = color(27,92,204,248)
+local primaryBlueLight = color(58,132,242,244)
+local primaryBlueDark = color(30,53,87,227)
+local primaryRed = color(184,45,64,248)
+local primaryRedLight = color(223,71,93,244)
+local primaryRedDark = color(82,39,52,227)
+local primaryRim = color(155,181,207,195)
+local controlShadow = color(5,9,14,208)
 local graphite = color(34,42,52,241)
 local graphiteDim = color(26,33,42,228)
 local graphiteEdge = color(107,122,136,132)
@@ -405,13 +374,20 @@ end
 local function primaryAction(layout, item, action, textValue, active)
     local press = 1-.085*motionAmount(layout,item)
     local span = item.w*press
-    local fillTint = action and (item.primary == "A" and primaryBlue or primaryRed) or primaryOff
-    fill(active and warm or primaryRim)
+    local isBlue = item.primary == "A"
+    local fillTint = action and (isBlue and primaryBlue or primaryRed)
+        or (isBlue and primaryBlueDark or primaryRedDark)
+    local face = action and (isBlue and primaryBlueLight or primaryRedLight) or fillTint
     ellipseMode(CENTER)
-    ellipse(item.x,item.y,span+2)
+    fill(controlShadow)
+    ellipse(item.x,item.y-2,span+2)
+    fill(active and warm or primaryRim)
+    ellipse(item.x,item.y,span+1)
     fill(fillTint)
     ellipse(item.x,item.y,span-2)
-    label(item.primary,item.x,item.y+6,23,action and white or muted)
+    fill(face)
+    ellipse(item.x,item.y+2,span-7)
+    label(item.primary,item.x,item.y+7,23,action and white or muted)
     label(textValue,item.x,item.y-13,item.w < 51 and 8 or 9,action and white or muted)
 end
 
@@ -474,23 +450,45 @@ local function drawScore(layout, game)
     chip(layout,layout.edit,"EDIT")
 end
 
-local stickFace = color(17,23,30,225)
-local stickThumb = color(89,102,116,236)
-local stickLight = color(145,158,173,184)
+local stickFace = color(13,19,26,232)
+local stickThumb = color(61,74,90,247)
+local stickLight = color(126,140,155,203)
+local stickTexture = color(160,175,190,135)
 local function drawJoystick(layout, x, y)
     local r, jx, jy = layout.joyRadius, layout.joyX, layout.joyY
-    local knobX, knobY = jx+x*r*.58,jy+y*r*.58
+    local knobX, knobY = jx+x*r*.55,jy+y*r*.55
     ellipseMode(CENTER)
+    fill(controlShadow)
+    ellipse(jx,jy-2,r*2+3)
     fill(graphiteEdge)
     ellipse(jx,jy,r*2+2)
     fill(graphite)
     ellipse(jx,jy,r*2)
     fill(stickFace)
-    ellipse(jx,jy,r*1.69)
+    ellipse(jx,jy,r*1.70)
+    stroke(graphiteEdge)
+    strokeWidth(1.2)
+    for index=0,11 do
+        local theta = index*math.pi/6
+        local dx,dy = math.cos(theta),math.sin(theta)
+        local inner = r*(index % 3 == 0 and .78 or .86)
+        line(jx+dx*inner,jy+dy*inner,jx+dx*r*.96,jy+dy*r*.96)
+    end
+    noStroke()
+    fill(controlShadow)
+    ellipse(knobX,knobY-2,r*.93)
     fill(stickLight)
-    ellipse(knobX,knobY,r*.86)
+    ellipse(knobX,knobY,r*.90)
     fill(stickThumb)
-    ellipse(knobX,knobY,r*.78)
+    ellipse(knobX,knobY+1,r*.80)
+    fill(stickTexture)
+    for column=-2,2 do
+        for row=-2,2 do
+            if column*column+row*row <= 5 then
+                ellipse(knobX+column*r*.105,knobY+row*r*.105,1.6)
+            end
+        end
+    end
 end
 
 local function clamp01(value)
@@ -607,6 +605,7 @@ function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel, ballEdge, pas
     drawBallEdge(ballEdge)
     passTarget(layout,passGuide)
     drawScore(layout,game)
+    chip(layout,layout.pause,"PAUSE")
     chip(layout,layout.camera,cameraLabel or "CAMERA","camera")
     chip(layout,layout.zoomOut,"","zoomOut")
     chip(layout,layout.zoomIn,"","zoomIn")

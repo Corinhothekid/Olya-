@@ -1,7 +1,11 @@
--- PolyLax Build 013 | Main
+-- PolyLax 2.0 | Main
 PolyLax = PolyLax or {}
 local P = PolyLax
 local state
+
+local function navigate(page)
+    state.page, state.pageAge, state.layout = page, 0, nil
+end
 
 local function configuredScene()
     local scene = craft.scene()
@@ -34,7 +38,12 @@ end
 
 local function clearPlayInput()
     state.joystick, state.aim, state.passAim, state.sprint, state.pick = nil, nil, nil, nil, nil
-    state.moveX, state.moveZ = 0, 0
+    state.moveX, state.moveZ, state.nubX, state.nubZ = 0, 0, 0, 0
+end
+
+local function openMenu(page)
+    clearPlayInput()
+    navigate(page)
 end
 
 local function openCreator()
@@ -48,7 +57,7 @@ local function openCreator()
         pedestal(scene, 15, .25, 15, -.225, color(7, 28, 60))
         pedestal(scene, 2.8, .15, 2.8, -.075, color(29, 64, 113))
     end
-    state.page = "CREATOR"
+    navigate("CREATOR")
     state.drag = nil
     clearPlayInput()
     state.yaw, state.targetYaw = 0, 0
@@ -70,7 +79,7 @@ local function openPlay(page)
             game = P.FullMatch.new(scene, state.profile, state.profile.TEAM, state.profile.OPPONENT)
         }
     end
-    state.page = page
+    navigate(page)
     state.drag = nil
     clearPlayInput()
     state.layout = nil
@@ -84,7 +93,7 @@ local function saveCareerResult(play)
 end
 
 local function openCareer()
-    state.page = "CAREER"
+    navigate("CAREER")
     state.careerView, state.careerPage = "profile", 1
     clearPlayInput()
     state.layout = nil
@@ -108,7 +117,7 @@ local function openCareerPlay()
         local game = P.FullMatch.new(scene, state.profile, state.career.team, fixture.opponent, options)
         state.careerPlay = {scene=scene, camera=camera, game=game, fixture=fixture}
     end
-    state.page = "CAREER_GAME"
+    navigate("CAREER_GAME")
     state.layout = nil
 end
 
@@ -142,7 +151,7 @@ local function careerTouch(touch)
     local function hit(item) return item and P.UI.hit(item, touch.x, touch.y) end
     if hit(hud.back) then
         finishName()
-        openCreator()
+        openMenu("FRONT")
         return
     end
     for _, button in ipairs(hud.nav) do
@@ -187,10 +196,52 @@ local function careerTouch(touch)
     end
 end
 
-local function activePlay()
-    if state.page == "MATCH" then return state.match, P.FullMatch end
-    if state.page == "CAREER_GAME" then return state.careerPlay, P.FullMatch end
+local function activePlay(page)
+    page = page or state.page
+    if page == "MATCH" then return state.match, P.FullMatch end
+    if page == "CAREER_GAME" then return state.careerPlay, P.FullMatch end
     return state.practice, P.Gameplay
+end
+
+local function isMenu(page)
+    return page=="FRONT" or page=="MODES" or page=="PAUSE"
+end
+
+local function menuLayout()
+    local play = state.resumePage and activePlay(state.resumePage)
+    return P.Style.screenLayout(state.page,{resetEnabled=not (play and play.recorded)})
+end
+
+local function menuTouch(touch)
+    if touch.state ~= BEGAN then return end
+    for _,button in ipairs(menuLayout().buttons) do
+        if button.enabled~=false and P.UI.hit(button,touch.x,touch.y) then
+            local id = button.id
+            if id=="CREATOR" then openCreator()
+            elseif id=="CAREER" then openCareer()
+            elseif id=="PRACTICE" or id=="MATCH" then openPlay(id)
+            elseif id=="MODES" or id=="HOME" then openMenu(id=="HOME" and "FRONT" or id)
+            elseif id=="RESUME" and state.resumePage then navigate(state.resumePage)
+            elseif id=="RESET" and state.resumePage then
+                local play,controller=activePlay(state.resumePage)
+                if play and not play.recorded then controller.command(play.game,"reset") end
+                navigate(state.resumePage)
+            end
+            return
+        end
+    end
+end
+
+local function updateAnalog(touch, joystick)
+    local dx,dy = (touch.x-joystick.x)/joystick.radius,(touch.y-joystick.y)/joystick.radius
+    local distance = math.sqrt(dx*dx+dy*dy)
+    local deadZone = .14
+    if distance <= deadZone then
+        state.moveX,state.moveZ=0,0
+        return
+    end
+    local force = math.min(1,(distance-deadZone)/(1-deadZone)) / distance
+    state.moveX,state.moveZ=dx*force,dy*force
 end
 
 local function worldMoveX(play)
@@ -269,11 +320,16 @@ function setup()
     local profile = P.Profile.load()
     state = {profile=profile, uniform=P.TeamUniform.fromProfile(profile),
         categoryIndex=4, career=P.Career.load()}
-    openCreator()
+    openMenu("FRONT")
 end
 
 function draw()
     local dt = math.max(0, math.min(DeltaTime or 1/60, .05))
+    state.pageAge = state.pageAge + dt
+    if isMenu(state.page) then
+        P.Style.screen(state.page,menuLayout(),state.pageAge)
+        return
+    end
     if state.page == "CAREER" then
         P.CareerUI.draw(state.career, careerLayout(), state.careerPlay,
             state.careerName ~= nil, state.careerName, state.careerMessage)
@@ -317,7 +373,10 @@ function draw()
             ballEdge = P.CameraController.ballEdge(play.camera, play.game.ball.position,
                 hud.frame, hud.leftX, hud.rightX)
         end
-        P.UI.practice(hud, play.game, state.moveX, state.moveZ,
+        local nubBlend=1-math.exp(-dt*24)
+        state.nubX=state.nubX+(state.moveX-state.nubX)*nubBlend
+        state.nubZ=state.nubZ+(state.moveZ-state.nubZ)*nubBlend
+        P.UI.practice(hud, play.game, state.nubX, state.nubZ,
             aimGuide(play, controller, dt), mode, ballEdge, passGuide(play,controller,hud))
     end
 end
@@ -342,6 +401,10 @@ end
 
 local function creatorTouch(touch, hud)
     if touch.state == BEGAN then
+        if hud.home and P.UI.hit(hud.home,touch.x,touch.y) then
+            openMenu("FRONT")
+            return
+        end
         if P.UI.hit(hud.career, touch.x, touch.y) then
             openCareer()
             return
@@ -465,6 +528,12 @@ local function playTouch(touch, hud)
     end
 
     if touch.state == BEGAN then
+        if hud.pause and P.UI.hit(hud.pause,touch.x,touch.y) then
+            if state.pick then controller.command(game,"releasepick",0,0) end
+            state.resumePage = state.page
+            openMenu("PAUSE")
+            return
+        end
         if P.UI.hit(hud.edit, touch.x, touch.y) then
             if state.pick then controller.command(game,"releasepick",0,0) end
             if state.page == "CAREER_GAME" then openCareer() else openCreator() end
@@ -522,14 +591,15 @@ local function playTouch(touch, hud)
         end
         if not state.joystick and touch.x >= hud.leftX and touch.x < hud.joyMaxX
             and touch.y >= hud.joyMinY and touch.y < hud.panelHeight then
-            state.joystick = {id=touch.id, x=touch.x, y=touch.y, radius=hud.joyRadius}
+            local x,z=touch.x-hud.joyX,touch.y-hud.joyY
+            if x*x+z*z <= (hud.joyRadius*1.28)^2 then
+                state.joystick = {id=touch.id,x=hud.joyX,y=hud.joyY,radius=hud.joyRadius}
+                updateAnalog(touch,state.joystick)
+            end
         end
     elseif state.joystick and touch.id == state.joystick.id then
         if touch.state == MOVING then
-            local dx = touch.x - state.joystick.x
-            local dy = touch.y - state.joystick.y
-            local length = math.max(state.joystick.radius, math.sqrt(dx*dx + dy*dy))
-            state.moveX, state.moveZ = dx / length, dy / length
+            updateAnalog(touch,state.joystick)
         elseif touch.state == ENDED or touch.state == CANCELLED then
             state.joystick = nil
             state.moveX, state.moveZ = 0, 0
@@ -539,7 +609,9 @@ end
 
 function touched(touch)
     if not state then return end
-    if state.page == "CREATOR" then
+    if isMenu(state.page) then
+        menuTouch(touch)
+    elseif state.page == "CREATOR" then
         creatorTouch(touch, currentHUDLayout())
     elseif state.page == "CAREER" then
         careerTouch(touch)
@@ -564,14 +636,14 @@ function setup()
     startupError = nil
     runChecked("PolyLax could not start", function()
         assert(type(runSetup) == "function" and type(runFrame) == "function",
-            "Install the complete Build 013 Main tab.")
+            "Install the complete PolyLax 2.0 Main tab.")
         local modules = PolyLax or {}
         local missing = {}
         for _, name in ipairs({
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens"
+            "Passing", "Tactics", "Screens", "Style"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name
