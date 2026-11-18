@@ -1,4 +1,4 @@
--- PolyLax Build 011 Gameplay | Main
+-- PolyLax Build 012 | Main
 PolyLax = PolyLax or {}
 local P = PolyLax
 local state
@@ -44,7 +44,7 @@ local function openCreator()
         pedestal(scene, 2.8, .15, 2.8, -.075, color(29, 64, 113))
     end
     state.page = "CREATOR"
-    state.drag, state.joystick, state.aim = nil, nil, nil
+    state.drag, state.joystick, state.aim, state.sprint = nil, nil, nil, nil
     state.moveX, state.moveZ = 0, 0
     state.yaw, state.targetYaw = 0, 0
     state.layout = nil
@@ -66,7 +66,7 @@ local function openPlay(page)
         }
     end
     state.page = page
-    state.drag, state.joystick, state.aim = nil, nil, nil
+    state.drag, state.joystick, state.aim, state.sprint = nil, nil, nil, nil
     state.moveX, state.moveZ = 0, 0
     state.layout = nil
 end
@@ -78,6 +78,22 @@ end
 
 local function worldMoveX(play)
     return state.moveX * (play.horizontal or -1)
+end
+
+local function updateSprint(game, dt)
+    local moving = state.moveX^2 + state.moveZ^2 > .06
+    local live = game.phase == nil or game.phase == "LIVE"
+    local holder = game.carrier and game.squad[game.carrier]
+    local offense = game.homeScore == nil or holder and holder.team == 1
+    local controlled = game.squad[game.controlled]
+    local energy = controlled.stamina or 1
+    game.sprinting = live and offense and state.sprint ~= nil and moving
+        and energy > (game.sprinting and .01 or .08)
+    for _, player in ipairs(game.squad) do
+        local effort = game.sprinting and player == controlled
+        player.stamina = math.max(0, math.min(1, (player.stamina or 1)
+            + dt * (effort and -.30 or live and .17 or .32)))
+    end
 end
 
 local function aimGuide(play, controller, dt)
@@ -134,21 +150,22 @@ function draw()
             P.UI.firstOption(selection, selected))
     else
         local play, controller = activePlay()
+        P.UI.step(hud, dt)
+        updateSprint(play.game, dt)
         controller.update(play.game, dt, worldMoveX(play), state.moveZ)
         if state.page == "MATCH" then
-            P.CameraController.match(play.camera, play.game, dt, state.aim and state.aim.shown)
+            P.CameraController.match(play.camera, play.game, dt, state.aim and state.aim.shown, hud.frame)
         else
-            P.CameraController.practice(play.camera, play.game, dt)
+            P.CameraController.practice(play.camera, play.game, dt, state.aim and state.aim.shown, hud.frame)
         end
         play.scene:update(dt)
         play.scene:draw()
-        if not play.horizontal then
-            local position = play.game.squad[play.game.controlled].rig.root.position
-            local a = P.CameraController.project(play.camera, position)
-            local b = P.CameraController.project(play.camera, position + vec3(.35, 0, 0))
-            if a and b and a.x ~= b.x then play.horizontal = b.x < a.x and -1 or 1 end
-        end
-        P.UI.practice(hud, play.game, state.moveX, state.moveZ, aimGuide(play, controller, dt))
+        local position = play.game.squad[play.game.controlled].rig.root.position
+        local a = P.CameraController.project(play.camera, position)
+        local b = P.CameraController.project(play.camera, position + vec3(.35, 0, 0))
+        if a and b and a.x ~= b.x then play.horizontal = b.x < a.x and -1 or 1 end
+        P.UI.practice(hud, play.game, state.moveX, state.moveZ,
+            aimGuide(play, controller, dt), P.CameraController.mode(play.camera))
     end
 end
 
@@ -241,6 +258,11 @@ end
 local function playTouch(touch, hud)
     local play, controller = activePlay()
     local game = play.game
+    local finished = touch.state == ENDED or touch.state == CANCELLED
+    if finished then
+        P.UI.release(hud, touch.id)
+        if state.sprint == touch.id then state.sprint = nil end
+    end
     local aim = state.aim
     if aim and touch.id == aim.id then
         if touch.state == MOVING then
@@ -268,25 +290,43 @@ local function playTouch(touch, hud)
             return
         end
         if P.UI.hit(hud.reset, touch.x, touch.y) then
-            state.aim = nil
+            P.UI.press(hud, hud.reset, touch.id)
+            state.aim, state.sprint = nil, nil
             controller.command(game, "reset")
             return
         end
-        for _, item in ipairs(hud.commands) do
+        if P.UI.hit(hud.camera, touch.x, touch.y) then
+            P.UI.press(hud, hud.camera, touch.id)
+            P.CameraController.cycle(play.camera)
+            return
+        end
+        for _, item in ipairs({hud.zoomOut, hud.zoomIn}) do
             if P.UI.hit(item, touch.x, touch.y) then
-                local action = item.id == "pass" and game.loose and "scoop" or item.id
-                if game.phase == "FACEOFF" and (action == "pass" or action == "shoot") then
-                    action = "faceoff"
-                end
-                if action == "shoot" and not state.aim and beginAim(touch, play, controller) then
-                    return
-                end
-                if action == "shoot" and state.aim then return end
-                controller.command(game, action, worldMoveX(play), state.moveZ)
+                P.UI.press(hud, item, touch.id)
+                P.CameraController.zoom(play.camera, item == hud.zoomIn and 1 or -1)
                 return
             end
         end
-        if not state.joystick and touch.x < WIDTH * .36 and touch.y < hud.panelHeight then
+        if not state.sprint and P.UI.hit(hud.sprint, touch.x, touch.y)
+            and P.UI.action(game, hud.sprint) == "sprint" then
+            state.sprint = touch.id
+            P.UI.press(hud, hud.sprint, touch.id)
+            return
+        end
+        for _, item in ipairs(hud.commands) do
+            local action = P.UI.action(game, item)
+            if action and P.UI.hit(item, touch.x, touch.y) then
+                P.UI.press(hud, item, touch.id)
+                if action == "shoot" then
+                    if not state.aim then beginAim(touch, play, controller) end
+                else
+                    controller.command(game, action, worldMoveX(play), state.moveZ)
+                end
+                return
+            end
+        end
+        if not state.joystick and touch.x < hud.joyMaxX
+            and touch.y < hud.panelHeight then
             state.joystick = {id=touch.id, x=touch.x, y=touch.y, radius=hud.joyRadius}
         end
     elseif state.joystick and touch.id == state.joystick.id then
@@ -327,7 +367,7 @@ function setup()
     startupError = nil
     runChecked("PolyLax could not start", function()
         assert(type(runSetup) == "function" and type(runFrame) == "function",
-            "Install the complete Build 011 Main tab.")
+            "Install the complete Build 012 Main tab.")
         local modules = PolyLax or {}
         local missing = {}
         for _, name in ipairs({

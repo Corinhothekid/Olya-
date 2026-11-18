@@ -337,7 +337,8 @@ local function movePlayers(game, dt)
     for index, player in ipairs(game.squad) do
         local vx, vz = 0, 0
         if index == game.controlled then
-            vx, vz = game.moveX * 6.1, -game.moveZ * 6.1
+            local speed = game.sprinting and 8.3 or 6.1
+            vx, vz = game.moveX * speed, -game.moveZ * speed
         elseif index ~= game.carrier then
             local tx, tz = offBallTarget(game, index, carrierX, carrierZ)
             if index == chase then

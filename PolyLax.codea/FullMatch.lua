@@ -292,7 +292,7 @@ function Match.command(match, action, moveX, moveZ, aim)
     elseif action == "dodge" then
         if holder and holder.team ~= 1 then startCheck(match, player)
         else startDodge(player, moveX, moveZ) end
-    elseif action == "check" then
+    elseif action == "check" or action == "poke" then
         startCheck(match, player)
     elseif action == "scoop" then
         startScoop(match, player)
@@ -344,7 +344,8 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
         local intent = intents[player.id]
         local vx, vz = 0, 0
         if player.id == match.controlled then
-            vx, vz = moveX * 8.8, -moveZ * 8.8
+            local rate = match.sprinting and 1.18 or 1
+            vx, vz = moveX * 8.8 * rate, -moveZ * 8.8 * rate
         elseif intent and intent.x and intent.z then
             local dx, dz = intent.x - player.x, intent.z - player.z
             local length = distance(dx, dz)
