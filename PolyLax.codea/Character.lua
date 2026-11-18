@@ -836,7 +836,18 @@ function Character.applyUniform(r, uniform, personalKit)
     m.shorts.diffuse = sharedGear and sharedGear.shorts or gear[option(profile, "SHORTS", 6)]
     m.gloves.diffuse = glove
     m.gloveTrim.diffuse = mix(glove, dark, .42)
+    m.gloves.roughness = .47
     m.helmet.diffuse = shell
+    if profile.HEIGHT and sharedGear then
+        local gloves=option(profile,"GLOVES",6)
+        local trim={m.gloveTrim.diffuse,silver,sharedGear.accent,dark,
+            mix(glove,silver,.23),mix(glove,dark,.52)}
+        m.gloveTrim.diffuse=trim[gloves]
+        m.gloves.roughness=({.47,.38,.45,.55,.31,.68})[gloves]
+        local brow={accent,silver,dark,sharedGear.secondary,mix(accent,silver,.28),
+            mix(accent,dark,.35),accent,dark,silver,mix(accent,silver,.36),sharedGear.secondary}
+        accent=brow[shellIndex]
+    end
     if accent and personalKit and chromeFinish then
         accent = mix(shell, accent, .35)
     end
@@ -898,5 +909,7 @@ function Character.apply(r, profile, category, uniform, personalKit)
     end
 
     local size = bodySizes[option(profile, "BODY", #bodySizes)]
-    r.proportions.scale = V(size[1], size[2], size[1])
+    local athlete = PolyLax.Athlete
+    local chosenHeight = athlete and athlete.heightScale(profile)
+    r.proportions.scale = V(size[1], chosenHeight or size[2], size[1])
 end

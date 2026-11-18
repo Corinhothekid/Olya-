@@ -128,7 +128,15 @@ function UI.creator(layout, category, categoryIndex, selected, firstOption, show
     local away = type(kit) == "string" and kit:lower() == "away"
     beginHud()
     fillRect(0, HEIGHT-layout.topBar, WIDTH, layout.topBar, navy)
-    leftLabel("MODIFY PLAYER", layout.leftX+2, layout.headerY, WIDTH < 350 and 15 or 18, white)
+    local title=athlete and options and options.team and options.team.short or "MODIFY PLAYER"
+    leftLabel(title,layout.leftX+2,layout.headerY+(athlete and 6 or 0),WIDTH<350 and 15 or 18,white)
+    if athlete and options and options.uniform then
+        for index,tint in ipairs({options.uniform.primary,options.uniform.secondary,options.uniform.accent}) do
+            fill(tint)
+            ellipseMode(CENTER)
+            ellipse(layout.leftX+9+(index-1)*16,layout.headerY-12,10)
+        end
+    end
     button(layout.fullGame,not athlete or away,11)
     button(layout.done,athlete and not away,11)
     fillRect(0,0,WIDTH,layout.panelHeight,navy)
@@ -146,7 +154,13 @@ function UI.creator(layout, category, categoryIndex, selected, firstOption, show
         local item = layout.options[slot]
         local index = firstOption + slot - 1
         item.label = category.choices[index]
-        if category.key == "TEAM" or category.key == "OPPONENT" then
+        if category.key=="IDENTITY" and options then
+            local key=index==1 and "first" or "last"
+            local value=options.part==key and (options.draft or "").."|" or options[key]
+            PolyLax.Style.panel(item.x,item.y,item.w,item.h,options.part==key,7)
+            label(item.label,item.x,item.y+6,8,silver)
+            label(value and value~="" and value or "Edit",item.x,item.y-7,9,white)
+        elseif category.key == "TEAM" or category.key == "OPPONENT" then
             local city, name = item.label:match("^(.*) (%S+)$")
             if city then
                 local active = index == selected
@@ -605,7 +619,7 @@ function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel, ballEdge, pas
     drawBallEdge(ballEdge)
     passTarget(layout,passGuide)
     drawScore(layout,game)
-    chip(layout,layout.pause,"PAUSE")
+    chip(layout,layout.pause,"PAUSE","pause")
     chip(layout,layout.camera,cameraLabel or "CAMERA","camera")
     chip(layout,layout.zoomOut,"","zoomOut")
     chip(layout,layout.zoomIn,"","zoomIn")

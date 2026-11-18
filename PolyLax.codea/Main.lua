@@ -24,16 +24,38 @@ local function pedestal(scene, width, height, depth, y, tint)
     entity.material.diffuse = tint
 end
 
+local function creatorCategories()
+    if state.careerCreator then
+        return P.Athlete.categories(state.career,state.careerPlay~=nil)
+    end
+    return P.Profile.categories
+end
+
 local function category()
-    return P.Profile.categories[state.categoryIndex]
+    return creatorCategories()[state.categoryIndex]
+end
+
+local function creatorProfile()
+    if state.careerCreator then return P.Athlete.profile(state.career,state.profile) end
+    return state.profile
+end
+
+local function creatorSelection()
+    local selected, profile=category(),creatorProfile()
+    if state.careerCreator then return P.Athlete.choice(state.career,profile,selected) end
+    return profile[selected.key]
 end
 
 local function applyCreatorProfile()
-    local selected = category().key
-    local personalColors = selected == "HELMET" or selected == "GLOVES" or selected == "SHORTS"
-    local uniform = selected == "OPPONENT" and
-        P.TeamUniform.opponent(state.uniform, state.profile.OPPONENT) or state.uniform
-    P.Character.apply(state.creator.rig, state.profile, selected, uniform, personalColors)
+    local selected=category().key
+    local personalColors=selected=="HELMET" or selected=="GLOVES" or selected=="SHORTS"
+    local uniform=selected=="OPPONENT" and P.TeamUniform.opponent(state.uniform,state.profile.OPPONENT)
+        or state.uniform
+    if state.careerCreator then
+        uniform=P.Athlete.uniform(state.career,state.careerKit=="away")
+        personalColors=false
+    end
+    P.Character.apply(state.creator.rig,creatorProfile(),selected,uniform,personalColors)
 end
 
 local function clearPlayInput()
@@ -46,7 +68,12 @@ local function openMenu(page)
     navigate(page)
 end
 
-local function openCreator()
+local function openCreator(athlete, section)
+    if state.careerCreator~=athlete then state.categoryIndex=4 end
+    state.careerCreator=athlete
+    state.careerKit="home"
+    if section then state.categoryIndex=section end
+    if athlete then P.Athlete.ensure(state.career,state.profile) end
     if not state.creator then
         local scene = configuredScene()
         local rig = P.Character.new(scene)
@@ -93,6 +120,7 @@ local function saveCareerResult(play)
 end
 
 local function openCareer()
+    P.Athlete.ensure(state.career,state.profile)
     navigate("CAREER")
     state.careerView, state.careerPage = "profile", 1
     clearPlayInput()
@@ -114,7 +142,9 @@ local function openCareerPlay()
         P.CameraController.cycle(camera)
         P.CameraController.cycle(camera)
         local options = P.Career.matchOptions(state.career, fixture)
-        local game = P.FullMatch.new(scene, state.profile, state.career.team, fixture.opponent, options)
+        options.playerName=P.Athlete.name(state.career)
+        local appearance=P.Athlete.profile(state.career,state.profile)
+        local game = P.FullMatch.new(scene,appearance,state.career.team,fixture.opponent,options)
         state.careerPlay = {scene=scene, camera=camera, game=game, fixture=fixture}
     end
     navigate("CAREER_GAME")
@@ -123,8 +153,17 @@ end
 
 local function finishName()
     if not state.careerName then return end
-    P.Career.rename(state.career, state.careerName)
-    state.careerName = nil
+    if state.careerNamePart then
+        P.Athlete.rename(state.career,state.profile,state.careerNamePart,state.careerName)
+        local play=state.careerPlay
+        if play then
+            local player=play.game.squad[play.game.careerPlayer]
+            player.name=P.Athlete.name(state.career)
+        end
+    else
+        P.Career.rename(state.career,state.careerName)
+    end
+    state.careerName,state.careerNamePart = nil,nil
     if hideKeyboard then hideKeyboard() end
 end
 
@@ -135,7 +174,7 @@ function keyboard(key)
     elseif key == BACKSPACE or key == "\b" then
         local last = utf8 and utf8.offset(state.careerName, -1) or #state.careerName
         state.careerName = state.careerName:sub(1, math.max(0, (last or 1)-1))
-    elseif type(key) == "string" and not key:match("[%c]") and #state.careerName+#key <= 24 then
+    elseif type(key) == "string" and not key:match("[%c]") and #state.careerName+#key <= P.Athlete.nameLimit then
         state.careerName = state.careerName..key
     end
 end
@@ -174,13 +213,9 @@ local function careerTouch(touch)
         state.careerPage = hud.page - 1
     elseif hit(hud.rightPage) then
         state.careerPage = hud.page + 1
-    elseif hit(hud.name) and showKeyboard then
-        state.careerName = career.name
-        showKeyboard()
-    elseif hit(hud.position) and not state.careerPlay then
-        P.Career.setPosition(career, career.position % #P.Career.positions+1)
-    elseif hit(hud.team) and not state.careerPlay then
-        P.Career.cycleSchool(career)
+    elseif hit(hud.name) then openCreator(true,1)
+    elseif hit(hud.position) then openCreator(true,2)
+    elseif hit(hud.team) then openCreator(true,5)
     elseif hit(hud.nextSkill) then
         state.careerSkill = (state.careerSkill or 1) % P.CareerSeason.trainingCount(career) + 1
     elseif hit(hud.train) and hud.train.enabled and not state.careerPlay then
@@ -217,7 +252,7 @@ local function menuTouch(touch)
     for _,button in ipairs(menuLayout().buttons) do
         if button.enabled~=false and P.UI.hit(button,touch.x,touch.y) then
             local id = button.id
-            if id=="CREATOR" then openCreator()
+            if id=="CREATOR" then openCreator(state.page=="PAUSE" and state.resumePage=="CAREER_GAME" or nil)
             elseif id=="CAREER" then openCareer()
             elseif id=="PRACTICE" or id=="MATCH" then openPlay(id)
             elseif id=="MODES" or id=="HOME" then openMenu(id=="HOME" and "FRONT" or id)
@@ -305,7 +340,8 @@ local function currentHUDLayout()
     if not state.layout or state.width ~= WIDTH or state.height ~= HEIGHT then
         state.width, state.height = WIDTH, HEIGHT
         state.layout = state.page == "CREATOR" and
-            P.UI.creatorLayout(P.Profile.categories) or P.UI.practiceLayout()
+            P.UI.creatorLayout(creatorCategories(), {athlete=state.careerCreator,kit=state.careerKit})
+            or P.UI.practiceLayout()
     end
     return state.layout
 end
@@ -345,9 +381,16 @@ function draw()
         P.CameraController.preview(creator.camera, creator.rig, selection.key, hud.frame, dt)
         creator.scene:update(dt)
         creator.scene:draw()
-        local selected = state.profile[selection.key]
-        P.UI.creator(hud, selection, state.categoryIndex, selected,
-            P.UI.firstOption(selection, selected), true)
+        local selected=creatorSelection()
+        local options
+        if state.careerCreator then
+            local first,last=P.Athlete.names(state.career)
+            options={athlete=true,kit=state.careerKit,first=first,last=last,
+                draft=state.careerName,part=state.careerNamePart,team=P.TeamUniform.get(state.career.team),
+                uniform=P.Athlete.uniform(state.career,state.careerKit=="away")}
+        end
+        P.UI.creator(hud,selection,state.categoryIndex,selected,
+            P.UI.firstOption(selection,selected),true,options)
     else
         local play, controller = activePlay()
         P.UI.step(hud, dt)
@@ -383,6 +426,23 @@ end
 
 local function updateChoice(index)
     local selection = category()
+    if state.careerCreator then
+        if selection.key=="IDENTITY" then
+            if not showKeyboard then return end
+            finishName()
+            local first,last=P.Athlete.names(state.career)
+            state.careerNamePart=index==1 and "first" or "last"
+            state.careerName=index==1 and first or last
+            showKeyboard()
+            return
+        end
+        P.Athlete.select(state.career,state.profile,selection,index,state.careerPlay~=nil)
+        applyCreatorProfile()
+        if state.careerPlay then
+            P.FullMatch.applyProfile(state.careerPlay.game,P.Athlete.profile(state.career,state.profile))
+        end
+        return
+    end
     P.Profile.select(state.profile, selection, index)
     if selection.key == "TEAM" then
         state.uniform = P.TeamUniform.fromProfile(state.profile)
@@ -394,27 +454,27 @@ local function updateChoice(index)
     if state.match then
         P.FullMatch.applyProfile(state.match.game, state.profile, state.profile.TEAM, state.profile.OPPONENT)
     end
-    if state.careerPlay then
-        P.FullMatch.applyProfile(state.careerPlay.game, state.profile)
-    end
 end
 
 local function creatorTouch(touch, hud)
     if touch.state == BEGAN then
         if hud.home and P.UI.hit(hud.home,touch.x,touch.y) then
-            openMenu("FRONT")
+            finishName()
+            if state.careerCreator then openCareer() else openMenu("FRONT") end
             return
         end
-        if P.UI.hit(hud.career, touch.x, touch.y) then
+        if not state.careerCreator and P.UI.hit(hud.career, touch.x, touch.y) then
             openCareer()
             return
         end
-        if P.UI.hit(hud.done, touch.x, touch.y) then
-            openPlay("PRACTICE")
-            return
-        end
-        if P.UI.hit(hud.fullGame, touch.x, touch.y) then
-            openPlay("MATCH")
+        local homeKit=P.UI.hit(hud.done,touch.x,touch.y)
+        local awayKit=P.UI.hit(hud.fullGame,touch.x,touch.y)
+        if homeKit or awayKit then
+            finishName()
+            if state.careerCreator then
+                state.careerKit=homeKit and "home" or "away"
+                applyCreatorProfile()
+            else openPlay(homeKit and "PRACTICE" or "MATCH") end
             return
         end
         if P.UI.hit(hud.reset, touch.x, touch.y) then
@@ -427,13 +487,14 @@ local function creatorTouch(touch, hud)
         end
         for _, item in ipairs(hud.categories) do
             if P.UI.hit(item, touch.x, touch.y) then
+                finishName()
                 state.categoryIndex = item.id
                 applyCreatorProfile()
                 return
             end
         end
         local selection = category()
-        local selected = state.profile[selection.key]
+        local selected=creatorSelection()
         if P.UI.hit(hud.left, touch.x, touch.y) then
             updateChoice((selected - 2) % #selection.choices + 1)
             return
@@ -643,7 +704,7 @@ function setup()
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens", "Style"
+            "Passing", "Tactics", "Screens", "Style", "Athlete"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name
