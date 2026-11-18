@@ -479,27 +479,29 @@ local function makeHead(r)
     end
 end
 
--- Each row describes half of the helmet from the visor's center to the nape.
--- Mirroring the rows makes the molded visor, temple, and rear shell continuous.
+-- Half contours go from the nose of the molded visor around each ear to the nape.
 local helmetLower = {
-    {0,.249,-.525}, {.138,.259,-.504}, {.255,.281,-.433}, {.346,.302,-.318},
-    {.403,.260,-.213}, {.438,.133,-.118}, {.447,-.031,-.011}, {.407,-.104,.106},
-    {.359,-.139,.218}, {.292,-.171,.311}, {.202,-.198,.375}, {.103,-.219,.403},
-    {0,-.225,.413}
+    {0,.203,-.393}, {.102,.208,-.372}, {.197,.224,-.327}, {.267,.241,-.265},
+    {.310,.211,-.189}, {.338,.100,-.116}, {.350,-.044,-.047}, {.326,-.119,.077},
+    {.285,-.166,.158}, {.228,-.192,.218}, {.155,-.209,.254}, {.079,-.217,.276},
+    {0,-.221,.286}
 }
 local helmetBrow = {
-    {0,.325,-.554}, {.145,.336,-.533}, {.265,.354,-.456}, {.355,.385,-.325},
-    {.423,.393,-.210}, {.455,.328,-.114}, {.468,.274,.003}, {.439,.246,.129},
-    {.393,.228,.261}, {.323,.212,.357}, {.224,.196,.430}, {.118,.185,.472},
-    {0,.180,.481}
+    {0,.249,-.413}, {.107,.254,-.392}, {.205,.266,-.340}, {.277,.284,-.270},
+    {.322,.287,-.190}, {.347,.244,-.111}, {.363,.189,-.026}, {.343,.157,.085},
+    {.306,.132,.168}, {.252,.118,.240}, {.177,.112,.282}, {.091,.112,.310},
+    {0,.119,.324}
 }
 local helmetSides = (#helmetLower - 1) * 2
 
 local function helmetRings()
     local rows = {{}, {}}
     local crown = {
-        {.471,.445,.411,.032}, {.553,.401,.373,.043}, {.632,.330,.315,.056},
-        {.689,.234,.235,.072}, {.724,.109,.137,.088}
+        -- height, lateral width, depth, center, front rake, rear lip
+        {.314,.355,.294,.016,.013,.006},
+        {.386,.297,.253,.024,.022,.014},
+        {.437,.216,.186,.045,.022,.036},
+        {.463,.119,.108,.069,.010,.017}
     }
     for i = 1, #crown do rows[i + 2] = {} end
     for side = 0, helmetSides - 1 do
@@ -511,17 +513,17 @@ local function helmetRings()
         rows[2][side+1] = V(sign * brow[1], brow[2], brow[3])
         local angle = side * math.pi * 2 / helmetSides
         local sin, cos = math.sin(angle), math.cos(angle)
+        local rear = math.max(0, -cos)^5
         for i, ring in ipairs(crown) do
-            local sweep = i == 1 and .033 or (i == 2 and .019 or .009)
-            rows[i+2][side+1] = V(ring[2] * sin, ring[1] - sweep * cos,
-                ring[4] - ring[3] * cos)
+            rows[i+2][side+1] = V(ring[2] * sin,
+                ring[1] - ring[5] * cos + rear * ring[6] * .38,
+                ring[4] - ring[3] * cos + rear * ring[6])
         end
     end
     return rows
 end
 
 local function helmetVent(row, side)
-    -- Cheek inlet, two staggered temple slots, and two tiers of rear exhaust.
     if row == 1 then return side == 5 or side == 10 or side == 11 end
     if row == 3 then return side == 6 or side == 7 or side == 11 end
     return row == 4 and (side == 5 or side == 6)
@@ -531,13 +533,12 @@ local function ventPanel(mesh, a, b, c, d, back)
     local function sample(u, v)
         return a + (b - a) * u + (d - a) * v + (c - b - d + a) * (u * v)
     end
-    local opening = {sample(.12,.30), sample(.88,.47), sample(.86,.78), sample(.16,.66)}
+    local opening = {sample(.12,.35), sample(.89,.47), sample(.85,.72), sample(.17,.63)}
     local normal = (d - a):cross(b - a):normalize()
     local center = (opening[1] + opening[2] + opening[3] + opening[4]) * .25
-    local corners = {a,b,c,d}
-    local inset = {}
+    local corners, inset = {a,b,c,d}, {}
     for i, point in ipairs(opening) do
-        inset[i] = center + (point - center) * .77 - normal * .032
+        inset[i] = center + (point - center) * .74 - normal * .016
     end
     if back then
         quad(mesh, inset[1], inset[4], inset[3], inset[2])
@@ -563,22 +564,19 @@ local function buildHelmetShell(mesh, section)
             if section == "recess" then
                 if opening then ventPanel(mesh, a, b, c, d, true) end
             elseif section == "shell" and (row > 1 or not visor) then
-                if opening then
-                    ventPanel(mesh, a, b, c, d, false)
-                else
-                    quad(mesh, a, d, c, b)
-                end
+                if opening then ventPanel(mesh, a, b, c, d, false)
+                else quad(mesh, a, d, c, b) end
             elseif section == "visor" and row == 1 and visor then
                 quad(mesh, a, d, c, b)
             end
         end
         if section == "shell" then
             local top = rows[#rows]
-            triangle(mesh, top[i], V(0,.731,.091), top[next])
+            triangle(mesh, top[i], V(0,.483,.088), top[next])
         elseif section == "recess" then
             local a, b = rows[1][i], rows[1][next]
             local function lining(p)
-                return V(p.x * .92, p.y + .017, p.z * .92 + .008)
+                return V(p.x * .95, p.y + .014, p.z * .95 + .004)
             end
             quad(mesh, a, b, lining(b), lining(a))
         end
@@ -591,66 +589,84 @@ local function makeHelmet(r)
     r.helmetRoot = root
     local parts = r.helmetParts
 
-    -- Original game mesh based on the XRS Pro's shape and sightlines.
-    part(r, root, "helmet molded shell", m.helmet, function(mesh)
+    part(r, root, "fitted helmet shell", m.helmet, function(mesh)
         buildHelmetShell(mesh, "shell")
     end, parts)
-    part(r, root, "helmet molded visor edge", m.brow, function(mesh)
+    part(r, root, "fitted helmet visor edge", m.brow, function(mesh)
         buildHelmetShell(mesh, "visor")
+        for _, sign in ipairs({-1,1}) do
+            local function p(x, y, z) return V(sign*x, y, z) end
+            local back, middle, front = p(.334,.071,-.064), p(.328,.018,-.166), p(.273,-.139,-.301)
+            bar(mesh,back,middle,.039,7,.034)
+            bar(mesh,middle,front,.034,7,.025)
+
+            -- Taper the cheek accent upward along the shell toward the nape.
+            local stripe = {{.47,.10},{.69,.087},{.83,.066},
+                {.91,.044},{.95,.025},{.96,.008}}
+            local low, high = back - V(0,.018,0), back + V(0,.018,0)
+            for i, section in ipairs(stripe) do
+                local index = i + 6
+                local lower, upper = helmetLower[index], helmetBrow[index]
+                local function edge(t)
+                    return p(lower[1] + (upper[1] - lower[1]) * t + .008,
+                        lower[2] + (upper[2] - lower[2]) * t,
+                        lower[3] + (upper[3] - lower[3]) * t + i*.001)
+                end
+                local nextLow = edge(section[1] - section[2])
+                local nextHigh = edge(section[1] + section[2])
+                if sign > 0 then quad(mesh,low,high,nextHigh,nextLow)
+                else quad(mesh,low,nextLow,nextHigh,high) end
+                low, high = nextLow, nextHigh
+            end
+        end
     end, parts)
-    part(r, root, "helmet ventilation and lining", m.vent, function(mesh)
+    part(r, root, "fitted helmet ventilation and lining", m.vent, function(mesh)
         buildHelmetShell(mesh, "recess")
         for _, sign in ipairs({-1,1}) do
-            local function p(x, y, z) return V(sign * x, y, z) end
-            rail(mesh, .020, {p(.426,.111,-.117), p(.390,-.073,-.186),
-                p(.298,-.189,-.276), p(.205,-.225,-.333)}, 6)
-            -- The sightline bars meet the molded temple mounts below the vents.
-            bevel(mesh, sign * .437, .182, -.145, .056, .108, .078)
-            bevel(mesh, sign * .424, .061, -.154, .058, .107, .089)
+            local function p(x, y, z) return V(sign*x, y, z) end
+            -- The lower cheek stays hollow on the side. A recessed lining gives
+            -- the opening depth while keeping the helmet interior in shadow.
+            local a,b,c,d = p(.310,.043,-.096), p(.309,-.022,-.196),
+                p(.279,-.156,-.297), p(.305,-.148,-.159)
+            if sign > 0 then quad(mesh,a,d,c,b) else quad(mesh,a,b,c,d) end
+            bevel(mesh, sign * .341, .062, -.099, .046, .086, .066)
+            bevel(mesh, sign * .316, -.086, -.170, .042, .073, .069)
         end
-        bevel(mesh, 0, -.198, .417, .144, .059, .050)
+        bevel(mesh, 0, -.188, .280, .122, .056, .040)
     end, parts)
-    part(r, root, "helmet contoured jaw and chin cup", m.liner, function(mesh)
+    part(r, root, "fitted helmet jaw rails and chin cup", m.liner, function(mesh)
         for _, sign in ipairs({-1,1}) do
-            local function p(x, y, z) return V(sign * x, y, z) end
-            rail(mesh, .055, {p(.414,.019,-.077), p(.397,-.112,-.182),
-                p(.314,-.197,-.290), p(.192,-.245,-.387)}, 8)
-            rail(mesh, .027, {p(.407,-.028,-.102), p(.390,-.149,-.182),
-                p(.304,-.228,-.297), p(.194,-.267,-.386)}, 7)
+            local function p(x, y, z) return V(sign*x, y, z) end
+            rail(mesh,.024,{p(.327,-.023,-.085),p(.323,-.122,-.171),p(.270,-.200,-.290),
+                p(.193,-.232,-.321)},7)
+            rail(mesh,.028,{p(.273,-.139,-.301),p(.249,-.184,-.317),p(.193,-.232,-.321)},7)
         end
-        rail(mesh, .043, {V(-.195,-.244,-.387), V(-.110,-.258,-.439),
-            V(.110,-.258,-.439), V(.195,-.244,-.387)}, 8)
-        bevel(mesh, 0, -.255, -.417, .243, .085, .126)
+        rail(mesh,.027,{V(-.193,-.232,-.321),V(-.104,-.247,-.343),
+            V(.104,-.247,-.343),V(.193,-.232,-.321)},7)
+        bevel(mesh,0,-.245,-.322,.212,.076,.081)
     end, parts)
-    part(r, root, "helmet dual sightline cage", m.cage, function(mesh)
-        local top = {V(-.419,.239,-.155),V(-.362,.216,-.340),V(-.255,.198,-.473),
-            V(-.115,.197,-.524),V(.115,.197,-.524),V(.255,.198,-.473),
-            V(.362,.216,-.340),V(.419,.239,-.155)}
-        local visionUpper = {V(-.425,.159,-.153),V(-.373,.104,-.350),V(-.265,.064,-.484),
-            V(-.114,.048,-.542),V(.114,.048,-.542),V(.265,.064,-.484),
-            V(.373,.104,-.350),V(.425,.159,-.153)}
-        local visionLower = {V(-.409,.029,-.180),V(-.353,-.019,-.348),V(-.252,-.073,-.469),
-            V(-.106,-.093,-.520),V(.106,-.093,-.520),V(.252,-.073,-.469),
-            V(.353,-.019,-.348),V(.409,.029,-.180)}
-        local jawRail = {V(-.371,-.112,-.204),V(-.309,-.154,-.350),V(-.209,-.197,-.434),
-            V(-.088,-.217,-.478),V(.088,-.217,-.478),V(.209,-.197,-.434),
-            V(.309,-.154,-.350),V(.371,-.112,-.204)}
-        rail(mesh, .018, top, 7)
-        rail(mesh, .012, visionUpper, 7)
-        rail(mesh, .013, visionLower, 7)
-        rail(mesh, .019, jawRail, 7)
-        for _, edge in ipairs({1, #top}) do
-            local side = edge == 1 and -1 or 1
-            local temple = edge + (side == -1 and 1 or -1)
-            local cheek = temple + (side == -1 and 1 or -1)
-            local chin = cheek + (side == -1 and 1 or -1)
-            rail(mesh, .019, {top[edge], visionUpper[edge], visionLower[edge], jawRail[edge]}, 7)
-            rail(mesh, .015, {top[temple], visionUpper[temple], visionLower[temple], jawRail[temple]}, 7)
-            rail(mesh, .014, {visionUpper[cheek], visionLower[cheek], jawRail[cheek]}, 7)
-            rail(mesh, .013, {visionUpper[chin], visionLower[chin], jawRail[chin]}, 7)
-            rail(mesh, .015, {jawRail[cheek], V(side * .172,-.229,-.419)}, 7)
-            bar(mesh, V(side * .454,.182,-.145), V(side * .470,.182,-.145), .015, 7)
-            bar(mesh, V(side * .441,.061,-.154), V(side * .457,.061,-.154), .013, 7)
+    part(r, root, "fitted helmet sightline cage", m.cage, function(mesh)
+        local upper = {V(-.341,.077,-.109),V(-.322,.067,-.231),V(-.239,.051,-.348),
+            V(-.110,.041,-.422),V(.110,.041,-.422),V(.239,.051,-.348),
+            V(.322,.067,-.231),V(.341,.077,-.109)}
+        local middle = {V(-.333,-.023,-.116),V(-.306,-.039,-.234),V(-.225,-.065,-.342),
+            V(-.103,-.072,-.408),V(.103,-.072,-.408),V(.225,-.065,-.342),
+            V(.306,-.039,-.234),V(.333,-.023,-.116)}
+        local lower = {V(-.315,-.109,-.144),V(-.284,-.129,-.232),V(-.199,-.161,-.311),
+            V(-.091,-.175,-.376),V(.091,-.175,-.376),V(.199,-.161,-.311),
+            V(.284,-.129,-.232),V(.315,-.109,-.144)}
+        rail(mesh,.013,upper,7)
+        rail(mesh,.012,middle,7)
+        rail(mesh,.014,lower,7)
+        for _, edge in ipairs({1,#upper}) do
+            local sign = edge == 1 and -1 or 1
+            local front = edge - sign*3
+            rail(mesh,.013,{upper[edge],middle[edge],lower[edge]},7)
+            rail(mesh,.011,{V(sign*.109,.227,-.381),V(sign*.109,.126,-.407),
+                upper[front],middle[front],lower[front],
+                V(sign*.089,-.224,-.350)},7)
+            bar(mesh,V(sign*.353,.062,-.099),V(sign*.366,.062,-.099),.012,7)
+            bar(mesh,V(sign*.331,-.086,-.170),V(sign*.344,-.086,-.170),.011,7)
         end
     end, parts)
 end

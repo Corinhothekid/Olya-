@@ -33,8 +33,11 @@ end
 local function previewBounds(rig, category)
     local height = rig.proportions.scale.y
     local width = rig.proportions.scale.x
-    if category == "FACE" or category == "HAIR" or
-       category == "BEARD" or category == "HELMET" then
+    if category == "HELMET" then
+        local headY = rig.head.worldPosition.y
+        -- Allow for the jaw, visor, and head motion as the fitted helmet turns.
+        return headY - .34 * height, headY + .55 * height, .53 * width
+    elseif category == "FACE" or category == "HAIR" or category == "BEARD" then
         local headY = rig.head.worldPosition.y
         return headY - .37 * height, headY + .79 * height, .68 * width
     elseif category == "GLOVES" then
