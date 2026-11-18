@@ -101,14 +101,29 @@ if PolyLax.Development then
     tap(hud.development); draw()
     assert(s.page=='DEVELOPMENT')
     local D=PolyLax.Development
+    local firstPage=D.layout(career,s.developmentPage)
+    assert(firstPage.page==1 and not firstPage.previous.enabled and firstPage.next.enabled)
+    local locked=firstPage.rows[1].upgrade
+    assert(not locked.enabled and D.points(career)==0)
+    local before=career.attributes[locked.id]
+    tap(locked); draw()
+    assert(career.attributes[locked.id]==before and D.points(career)==0)
+    tap(firstPage.next); draw()
+    local secondPage=D.layout(career,s.developmentPage)
+    assert(secondPage.page==2 and secondPage.previous.enabled)
+    tap(secondPage.previous); draw()
+    assert(s.developmentPage==1)
     assert(D.reward(career,'test-objective',220,12))
     assert(not D.reward(career,'test-objective',220,12))
     local dk=D.layout(career,1)
     local item=dk.rows[1].upgrade
     local previous=career.attributes[item.id]
     local points=D.points(career)
+    local cost=assert(PolyLax.Attributes.cost(career.attributes,item.id,career.position))
     tap(item); draw()
-    assert(career.attributes[item.id]>previous and D.points(career)<points)
+    assert(career.attributes[item.id]==previous+1 and D.points(career)==points-cost)
+    local reloaded=PolyLax.Career.load()
+    assert(reloaded.attributes[item.id]==previous+1 and D.points(reloaded)==points-cost)
     tap(dk.drill); draw()
     assert(s.page=='TRAINING' and s.training.game.clock<60 and s.training.game.clock>59)
     local game=s.training.game
@@ -117,7 +132,7 @@ if PolyLax.Development then
     assert(D.claimed(career,s.training.rewardKey))
     tap(s.layout.edit);draw()
     assert(s.page=='DEVELOPMENT')
-    print('Development paging, costed upgrades, drill entry and once-earned reward passed.')
+    print('Development rendering, paging, locked upgrades, exact skill point spend, reload, and drill rewards passed.')
 end
 if PolyLax.Statistics then
     local D=PolyLax.Development

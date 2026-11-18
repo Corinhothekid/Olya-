@@ -116,10 +116,16 @@ CENTER, CORNER, FULLSCREEN, PORTRAIT = 0, 1, 2, 3
 local store={}
 function readLocalData(key) return store[key] end
 function saveLocalData(key,value) store[key]=value end
+local currentFontSize=17
+function fontSize(size)
+    if size==nil then return currentFontSize end
+    assert(type(size)=='number', "fontSize expects a number, got "..type(size))
+    currentFontSize=size
+end
 local noop=function()end
 for _,key in ipairs({'supportedOrientations','displayMode','pushStyle','popStyle',
         'pushMatrix','popMatrix','resetMatrix','ortho','viewMatrix','noStroke',
-        'font','textMode','textAlign','fill','fontSize','text','rectMode','rect',
+        'font','textMode','textAlign','fill','text','rectMode','rect',
         'matrix','ellipseMode','ellipse'}) do _G[key]=noop end
 
 return {scenes=scenes,store=store,rotate=rotate}

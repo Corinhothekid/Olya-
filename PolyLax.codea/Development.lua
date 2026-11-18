@@ -228,7 +228,8 @@ end
 
 local function button(style, item, active)
     style.panel(item.x, item.y, item.w, item.h, item.enabled and active, 9)
-    label(item.label, item.x, item.y, item.id == "previous" or item.id == "next" and 17 or 12,
+    local isPager = item.id == "previous" or item.id == "next"
+    label(item.label, item.x, item.y, isPager and 17 or 12,
         item.enabled and style.palette.white or style.palette.muted)
 end
 
