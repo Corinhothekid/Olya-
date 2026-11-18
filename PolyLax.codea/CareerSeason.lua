@@ -464,9 +464,20 @@ function Season.trainingCount(career)
     return #(skills[career.position] or skills[2])
 end
 
+local modernSkill={shooting="shotPower",ballSecurity="ballControl",
+    interception="defensiveAwareness",reaction="defensiveAwareness",
+    handSpeed="reflexes",clearingAccuracy="passing"}
+
 function Season.training(career, index)
     local list = skills[career.position] or skills[2]
     local item = list[((index or 1)-1)%#list+1]
+    if P.Development then
+        local key=modernSkill[item[1]] or item[1]
+        local current=P.Attributes.restore(career.attributes,career.position)[key]
+        local nextValue,cost=P.Attributes.advance(career.attributes,key,career.position)
+        return {key=key,label=item[2],value=current,cost=cost or 0,
+            gain=nextValue and nextValue-current or 0,available=nextValue and P.Development.points(career)>=cost or false}
+    end
     local value = career.attributes[item[1]]
     local cost = 40 + math.max(0,value-65)*2
     return {key=item[1],label=item[2],value=value,cost=cost,gain=math.min(3,99-value),
@@ -474,6 +485,7 @@ function Season.training(career, index)
 end
 
 function Season.train(career, key)
+    if P.Development then return P.Development.upgrade(career,modernSkill[key] or key) end
     for index=1,Season.trainingCount(career) do
         local skill = Season.training(career,index)
         if skill.key==key and skill.available then

@@ -746,7 +746,8 @@ local function score(match, flight, hit)
     P.Screens.creditGoal(match,flight.from,match.screenStat,flight)
     P.Screens.reset(match)
     local assist = match.assist
-    if assist and assist.to == flight.from and match.elapsed-assist.at <= 8 then
+    if assist and assist.to==flight.from and match.elapsed-assist.at<=4.8
+        and (not assist.received or (flight.origin-assist.received):len()<=12) then
         Match.recordStat(match, assist.from, "assists",1,{other=flight.from})
     end
     match.assist = nil
@@ -783,7 +784,7 @@ local function updateFlight(match, dt, catchIndex)
             if flight.keeperOutlet then
                 P.Statistics.record(match,flight.from,"clearsCompleted",1,{other=flight.to})
             end
-            match.assist = {from=flight.from,to=flight.to,at=match.elapsed}
+            match.assist = {from=flight.from,to=flight.to,at=match.elapsed,received=position}
         elseif progress >= 1 then
             local velocity = P.Passing.endVelocity(match,flight)
             if not flight.to then position.y = ballRadius end

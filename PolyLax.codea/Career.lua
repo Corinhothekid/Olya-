@@ -20,12 +20,6 @@ Career.positions = {
     {label="Goalie", slot=10, attributes={reflexes=75, handSpeed=74, clearingAccuracy=68, strength=62}}
 }
 
-local baseAttributes = {
-    shooting=57, ballSecurity=58, speed=61, passing=58, stamina=60, faceoff=51,
-    reaction=58, bodyCheck=56, stickCheck=56, interception=56,
-    reflexes=55, handSpeed=54, clearingAccuracy=57, strength=60
-}
-
 Career.stages = {highSchool="HIGH SCHOOL", college="COLLEGE", professional="PROFESSIONAL"}
 
 local function position(index)
@@ -107,7 +101,9 @@ function Career.load()
     end
     saved.history = type(saved.history) == "table" and saved.history or {}
     saved.attributes=P.Attributes.restore(saved.attributes,saved.position)
-    saved.stats = careerStats(saved.stats)
+    local stored=type(saved.stats)=="table" and saved.stats or {}
+    if stored.gamesPlayed==nil then stored.gamesPlayed=saved.games end
+    saved.stats=careerStats(stored)
     saved.entries = type(saved.entries) == "table" and saved.entries or {}
     return saved
 end

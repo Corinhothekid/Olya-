@@ -52,11 +52,13 @@ function Style.rounded(x, y, w, h, radius, tint, press)
     popMatrix()
 end
 
+local panelShadow = color(5,9,14,173)
+local panelActive = color(27,85,172)
 function Style.panel(x, y, w, h, active, radius)
     radius = radius or 12
-    Style.rounded(x,y-2,w,h,radius,color(5,9,14,173))
+    Style.rounded(x,y-2,w,h,radius,panelShadow)
     Style.rounded(x,y,w,h,radius,active and palette.blue or palette.steel)
-    Style.rounded(x,y,w-2,h-2,math.max(0,radius-1),active and color(27,85,172) or palette.body)
+    Style.rounded(x,y,w-2,h-2,math.max(0,radius-1),active and panelActive or palette.body)
 end
 
 local choices = {
@@ -139,7 +141,6 @@ local lineInk = color(72,108,143,83)
 local banner = color(22,32,46,239)
 local overlayInk = color(6,10,16,191)
 local cardShadow = color(7,10,15,221)
-local blueBase = color(27,81,164)
 local blueTop = color(34,92,182)
 local disabled = color(122,136,152)
 local disabledCard = color(21,28,38,228)
@@ -214,6 +215,23 @@ function Style.screen(page, l, elapsed)
         Style.rounded(l.x,l.titleY-25,41+tempo*7,2,1,palette.glow)
     end
     for _,item in ipairs(l.buttons) do drawButton(l,item) end
+    popMatrix()
+    popStyle()
+end
+
+
+function Style.fade(age)
+    local alpha=math.floor(118*math.max(0,1-age/.18))
+    if alpha==0 then return end
+    pushStyle()
+    pushMatrix()
+    resetMatrix()
+    ortho()
+    viewMatrix(matrix())
+    noStroke()
+    rectMode(CORNER)
+    fill(8,15,26,alpha)
+    rect(0,0,WIDTH,HEIGHT)
     popMatrix()
     popStyle()
 end

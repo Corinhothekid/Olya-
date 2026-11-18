@@ -78,7 +78,7 @@ local function listLayout(l, entries, requestedPage, height)
 end
 
 local statModes={{id="career",label="Career"},{id="season",label="Season"},
-    {id="matches",label="Box scores"},{id="leaders",label="Leaders"}}
+    {id="matches",label="Boxes"},{id="leaders",label="Leaders"},{id="timeline",label="Timeline"}}
 local leaderCache={}
 
 local function leaders(career)
@@ -110,6 +110,18 @@ local statFields={
 local function report(career,kind)
     local entries={}
     if kind=="leaders" then return leaders(career) end
+    if kind=="timeline" then
+        local function seasonRow(item,active)
+            local team=P.TeamUniform.get(item.team)
+            local stage=P.Career.stages[item.stage] or item.stage or ""
+            local detail=active and "NOW" or item.title and "TITLE" or
+                string.format("%d–%d–%d",item.wins or 0,item.losses or 0,item.ties or 0)
+            entries[#entries+1]={label="S"..item.season.."  "..team.short.." · "..stage,value=detail}
+        end
+        seasonRow(career,true)
+        for i=#(career.history or {}),1,-1 do seasonRow(career.history[i],false) end
+        return entries
+    end
     if kind=="matches" then
         local profile=P.Statistics.profile("career-player")
         for index=#profile.order,1,-1 do
@@ -249,7 +261,9 @@ end
 local function drawOverview(career,l,editing,draft,playing)
     local name = l.name
     if editing then name = box(name.x,name.y,name.w,name.h,(draft or "").."|") end
-    card(name,"PLAYER NAME")
+    local appearance=P.Athlete.profile(career)
+    local rating=P.Attributes.overall(career.attributes,career.position)
+    card(name,string.format("ATHLETE  ·  #%d  ·  %d OVR",(appearance.NUMBER or 1)-1,rating))
     card(l.position,"POSITION",false,career.games>0 or playing)
     card(l.team,"TEAM",false,career.games>0 or playing)
     local status = l.status or {}
@@ -259,13 +273,17 @@ local function drawOverview(career,l,editing,draft,playing)
         or status.title == true and "CHAMPIONSHIP WON" or P.Career.stages[career.stage]
     label(title,l.x,summary.y+25*scale,12,amber,l.w-18)
     local xp = math.max(0,career.xp-(career.spentXP or 0))
-    label(string.format("RECORD  %d–%d–%d     XP  %d",career.wins,career.losses,career.ties,xp),
+    local season=career.seasonData or career
+    label(string.format("SEASON  %d–%d–%d     XP  %d",season.wins or 0,season.losses or 0,season.ties or 0,xp),
         l.x,summary.y+7*scale,13,white,l.w-18)
     local role = status.starter == true and "STARTER" or status.starter == false and "RESERVE"
     local detail = status.statusLine or ""
     if role then detail = role .. (detail == "" and "" or "  ·  "..detail) end
     label(detail,l.x,summary.y-11*scale,10,muted,l.w-18)
-    local award = (status.championships or 0) > 0 and ("Titles "..status.championships)
+    local trophyCount=#P.Awards.trophies(career)
+    local award = trophyCount>0 and ("Honors "..trophyCount)
+        or (status.championships or 0)>0 and ("Titles "..status.championships)
+    if status.lastResult and not award then award="Last game  "..status.lastResult end
     if status.contract then
         award = status.contract .. (award and "  ·  "..award or "")
     end

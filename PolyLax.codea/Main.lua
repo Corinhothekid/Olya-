@@ -538,16 +538,19 @@ function draw()
     end
     if state.page=="STATS" then
         P.StatsUI.draw(P.StatsUI.layout(state.statView))
+        P.Style.fade(state.pageAge)
         return
     end
     if state.page=="DEVELOPMENT" then
         local l=P.Development.layout(state.career,state.developmentPage)
         P.Development.draw(state.career,l,state.developmentMessage)
+        P.Style.fade(state.pageAge)
         return
     end
     if state.page == "CAREER" then
         P.CareerUI.draw(state.career, careerLayout(), state.careerPlay,
-            state.careerName ~= nil, state.careerName, state.careerMessage)
+            state.careerName ~= nil,state.careerName,state.careerMessage)
+        P.Style.fade(state.pageAge)
         return
     end
     local hud = currentHUDLayout()
@@ -570,6 +573,7 @@ function draw()
         end
         P.UI.creator(hud,selection,state.categoryIndex,selected,
             P.UI.firstOption(selection,selected),true,options)
+        P.Style.fade(state.pageAge)
     else
         local play,controller=activePlay()
         if play.presentation and drawPresentation(play,dt) then return end
