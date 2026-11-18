@@ -209,6 +209,7 @@ end
 
 local function resetMatch(match)
     match.homeScore, match.awayScore = 0, 0
+    match.lastGoalScorer,match.lastGoalTeam=nil,nil
     match.period, match.clock, match.elapsed = 1, match.rules.periodLength, 0
     match.stats = {newStats(), newStats()}
     match.faceoffSerial = 0
@@ -737,6 +738,7 @@ end
 
 local function score(match, flight, hit)
     local team = flight.team
+    match.lastGoalScorer,match.lastGoalTeam=flight.from,team
     Match.recordStat(match, flight.from, "goals")
     Match.recordStat(match, flight.from, "shotsOnGoal")
     P.Statistics.goalkeeper(match,match.keepers[3-team],"goal",flight.from)

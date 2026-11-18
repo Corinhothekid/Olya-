@@ -92,6 +92,12 @@ local function openCreator(athlete, section)
     applyCreatorProfile()
 end
 
+local function beginPresentation(play,kind,options)
+    options=options or {}
+    options.frame=P.UI.practiceLayout().frame
+    return P.Presentation.start(play,kind,options)
+end
+
 local function openPlay(page)
     if page == "PRACTICE" and not state.practice then
         local scene = configuredScene()
@@ -105,6 +111,7 @@ local function openPlay(page)
             scene = scene, camera = P.CameraController.new(scene, 48),
             game = P.FullMatch.new(scene, state.profile, state.profile.TEAM, state.profile.OPPONENT)
         }
+        beginPresentation(state.match,"pregame")
     end
     navigate(page)
     state.drag = nil
@@ -165,7 +172,8 @@ local function openCareerPlay()
         options.playerName=P.Athlete.name(state.career)
         local appearance=P.Athlete.profile(state.career,state.profile)
         local game = P.FullMatch.new(scene,appearance,state.career.team,fixture.opponent,options)
-        state.careerPlay = {scene=scene, camera=camera, game=game, fixture=fixture}
+        state.careerPlay = {scene=scene,camera=camera,game=game,fixture=fixture}
+        beginPresentation(state.careerPlay,"pregame")
     end
     navigate("CAREER_GAME")
     state.layout = nil
@@ -236,7 +244,10 @@ local function openTraining()
 end
 
 local function resetPlaySession(play,controller,page)
+    if play.presentation then P.Presentation.skip(play) end
     controller.command(play.game,"reset")
+    play.presentedGoal,play.presentedFinal=nil,nil
+    if controller==P.FullMatch then beginPresentation(play,"pregame") end
     if page=="TRAINING" then play.game.clock=60 end
     play.rewardAttempted=nil
 end
@@ -481,6 +492,43 @@ function setup()
     openMenu("FRONT")
 end
 
+local function finishPresentation(play,kind)
+    if kind=="postgame" or kind=="championship" then
+        openStats(play.game,state.page)
+        return true
+    end
+end
+
+local function drawPresentation(play,dt)
+    local cinematic=play.presentation
+    if not cinematic then return false end
+    if not P.Presentation.update(play,dt) then
+        return finishPresentation(play,cinematic.kind)
+    end
+    play.scene:update(dt)
+    play.scene:draw()
+    P.Presentation.draw(play)
+    return true
+end
+
+local function matchPresentation(play)
+    local game=play.game
+    if game.phase=="GOAL" then
+        local total=game.homeScore+game.awayScore
+        if total~=play.presentedGoal then
+            play.presentedGoal=total
+            beginPresentation(play,"goal",{scorer=game.lastGoalScorer,team=game.lastGoalTeam})
+        end
+    elseif game.phase=="FINAL" and not play.presentedFinal then
+        play.presentedFinal=true
+        local summary=P.Statistics.matchSummary(game)
+        local best=summary and P.Statistics.playerOfGame(summary)
+        local won=game.homeScore>game.awayScore
+        local title=play.fixture and play.fixture.postseason=="championship" and won
+        beginPresentation(play,"postgame",{championship=title,playerOfGame=best and best.name})
+    end
+end
+
 function draw()
     local dt = math.max(0, math.min(DeltaTime or 1/60, .05))
     state.pageAge = state.pageAge + dt
@@ -523,7 +571,8 @@ function draw()
         P.UI.creator(hud,selection,state.categoryIndex,selected,
             P.UI.firstOption(selection,selected),true,options)
     else
-        local play, controller = activePlay()
+        local play,controller=activePlay()
+        if play.presentation and drawPresentation(play,dt) then return end
         P.UI.step(hud, dt)
         updateSprint(play.game, dt)
         controller.update(play.game, dt, worldMoveX(play), state.moveZ)
@@ -532,6 +581,8 @@ function draw()
         end
         if controller==P.Gameplay then updateTrainingReward(play,state.page) end
         if controller==P.FullMatch then
+            matchPresentation(play)
+            if play.presentation and drawPresentation(play,0) then return end
             P.CameraController.match(play.camera, play.game, dt, state.aim and state.aim.shown, hud.frame)
         else
             P.CameraController.practice(play.camera, play.game, dt, state.aim and state.aim.shown, hud.frame)
@@ -673,8 +724,14 @@ local function beginAim(touch, play, controller)
 end
 
 local function playTouch(touch, hud)
-    local play, controller = activePlay()
-    local game = play.game
+    local play,controller=activePlay()
+    local game=play.game
+    if play.presentation then
+        local kind=play.presentation.kind
+        P.Presentation.touch(play,touch)
+        if not play.presentation then finishPresentation(play,kind) end
+        return
+    end
     local finished = touch.state == ENDED or touch.state == CANCELLED
     if finished then
         P.UI.release(hud, touch.id)
@@ -848,7 +905,7 @@ function setup()
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI"
+            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name
