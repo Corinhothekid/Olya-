@@ -112,6 +112,22 @@ local function openPlay(page)
     state.layout = nil
 end
 
+local function openStats(game, backPage)
+    local view=P.StatsUI.open(game)
+    if not view then return end
+    state.statView,state.statReturn=view,backPage
+    clearPlayInput()
+    navigate("STATS")
+end
+
+local function statTouch(touch)
+    local view=state.statView
+    if P.StatsUI.touch(view,P.StatsUI.layout(view),touch)=="close" then
+        navigate(state.statReturn)
+        state.statView,state.statReturn=nil,nil
+    end
+end
+
 local function saveCareerResult(play)
     if play.recorded or play.game.phase ~= "FINAL" then return end
     local saved, reason = P.Career.record(state.career, play.fixture, play.game)
@@ -142,6 +158,8 @@ local function openCareerPlay()
         P.CameraController.cycle(camera)
         P.CameraController.cycle(camera)
         local options = P.Career.matchOptions(state.career, fixture)
+        options.statistics={fixture=fixture,profileId="career-player",stage=state.career.stage,
+            season=state.career.season,postseason=fixture.postseason}
         options.playerName=P.Athlete.name(state.career)
         local appearance=P.Athlete.profile(state.career,state.profile)
         local game = P.FullMatch.new(scene,appearance,state.career.team,fixture.opponent,options)
@@ -181,7 +199,7 @@ end
 
 local function careerLayout()
     return P.CareerUI.layout(state.career, state.careerView, state.careerPlay,
-        state.careerSkill, state.careerPage)
+        state.careerSkill, state.careerPage,state.careerStatMode)
 end
 
 local function openDevelopment()
@@ -281,6 +299,20 @@ local function careerTouch(touch)
             return
         end
     end
+    for _,button in ipairs(hud.statModes or {}) do
+        if hit(button) then
+            state.careerStatMode,state.careerPage=button.id,1
+            return
+        end
+    end
+    if state.careerView=="stats" then
+        for _,row in ipairs(hud.rows or {}) do
+            if row.value.box and hit(row.item) then
+                openStats(row.value.box,"CAREER")
+                return
+            end
+        end
+    end
     if not state.careerPlay then
         for _, button in ipairs(hud.offerButtons or {}) do
             if hit(button) and P.CareerSeason.accept(career, button.id) then
@@ -327,7 +359,8 @@ end
 
 local function menuLayout()
     local play = state.resumePage and activePlay(state.resumePage)
-    return P.Style.screenLayout(state.page,{resetEnabled=not (play and play.recorded)})
+    return P.Style.screenLayout(state.page,{resetEnabled=not (play and play.recorded),
+        statsEnabled=play and play.game.statistics~=nil})
 end
 
 local function menuTouch(touch)
@@ -340,6 +373,9 @@ local function menuTouch(touch)
             elseif id=="PRACTICE" or id=="MATCH" then openPlay(id)
             elseif id=="MODES" or id=="HOME" then openMenu(id=="HOME" and "FRONT" or id)
             elseif id=="RESUME" and state.resumePage then navigate(state.resumePage)
+            elseif id=="STATS" and state.resumePage then
+                local play=activePlay(state.resumePage)
+                if play then openStats(play.game,"PAUSE") end
             elseif id=="RESET" and state.resumePage then
                 local play,controller=activePlay(state.resumePage)
                 if play and not play.recorded then resetPlaySession(play,controller,state.resumePage) end
@@ -449,6 +485,10 @@ function draw()
         P.Style.screen(state.page,menuLayout(),state.pageAge)
         return
     end
+    if state.page=="STATS" then
+        P.StatsUI.draw(P.StatsUI.layout(state.statView))
+        return
+    end
     if state.page=="DEVELOPMENT" then
         local l=P.Development.layout(state.career,state.developmentPage)
         P.Development.draw(state.career,l,state.developmentMessage)
@@ -510,6 +550,7 @@ function draw()
         state.nubZ=state.nubZ+(state.moveZ-state.nubZ)*nubBlend
         P.UI.practice(hud, play.game, state.nubX, state.nubZ,
             aimGuide(play, controller, dt), mode, ballEdge, passGuide(play,controller,hud))
+        P.StatsUI.drawEntry(hud,play.game)
     end
 end
 
@@ -678,6 +719,12 @@ local function playTouch(touch, hud)
     end
 
     if touch.state == BEGAN then
+        local stats=P.StatsUI.entry(hud,game)
+        if stats and P.UI.hit(stats,touch.x,touch.y) then
+            if state.pick then controller.command(game,"releasepick",0,0) end
+            openStats(game,state.page)
+            return
+        end
         if hud.pause and P.UI.hit(hud.pause,touch.x,touch.y) then
             if state.pick then controller.command(game,"releasepick",0,0) end
             state.resumePage = state.page
@@ -768,6 +815,8 @@ function touched(touch)
         careerTouch(touch)
     elseif state.page=="DEVELOPMENT" then
         developmentTouch(touch)
+    elseif state.page=="STATS" then
+        statTouch(touch)
     else
         playTouch(touch, currentHUDLayout())
     end
@@ -796,7 +845,7 @@ function setup()
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development"
+            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

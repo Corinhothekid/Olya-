@@ -18,6 +18,7 @@ local tabs = {
     {id="profile",label="Overview"},
     {id="schedule",label="Schedule"},
     {id="standings",label="Standings"},
+    {id="stats",label="Stats"},
     {id="offers",label="Offers"}
 }
 
@@ -75,7 +76,49 @@ local function listLayout(l, entries, requestedPage, height)
     end
 end
 
-function UI.layout(career, view, playing, trainIndex, page)
+local statModes={{id="career",label="Career"},{id="season",label="Season"},{id="matches",label="Box scores"}}
+local statFields={
+    {"Games played","gamesPlayed"},{"Starts","gamesStarted"},{"Minutes","minutesPlayed",1},
+    {"Goals","goals"},{"Assists","assists"},{"Points","points"},{"Shots","shots"},
+    {"On target","shotsOnGoal"},{"Shooting %","shootingPct",2},{"Ground balls","groundBalls"},
+    {"Caused turnovers","causedTurnovers"},{"Turnovers","turnovers"},{"Forced losses","committedForcedTurnovers"},
+    {"Unforced losses","unforcedTurnovers"},{"Penalties","penalties"},{"Penalty minutes","penaltyMinutes",1},
+    {"Faceoff wins","faceoffs"},{"Faceoff attempts","faceoffAttempts"},{"Faceoff %","faceoffPct",2},
+    {"Saves","saves"},{"Goals allowed","goalsAllowed"},{"Save %","savePct",2},
+    {"Screens","screens"},{"Screen assists","screenAssists"},{"Team wins","wins"},{"Team losses","losses"}
+}
+
+local function report(career,kind)
+    local entries={}
+    if kind=="matches" then
+        local profile=P.Statistics.profile("career-player")
+        for index=#profile.order,1,-1 do
+            local summary=profile.matches[profile.order[index]]
+            if summary then
+                local away=summary.awayId and P.TeamUniform.get(summary.awayId).short or ""
+                entries[#entries+1]={label=(summary.mode or "Match").."  "..away,
+                    value=summary.homeScore.."–"..summary.awayScore,box=summary}
+            end
+        end
+        return entries
+    end
+    local season=career.seasonData or {}
+    local stats=kind=="season" and (season.personal or {}) or career.stats
+    local rates=P.Statistics.rates(stats)
+    local record=kind=="season" and season or career
+    for _,field in ipairs(statFields) do
+        local key,format=field[2],field[3]
+        local value=key=="wins" or key=="losses"
+        value=value and record[key] or stats[key]
+        if format==2 then value=rates[key] and string.format("%.0f%%",rates[key]*100) or "–"
+        elseif format==1 then value=string.format("%.1f",value or 0)
+        else value=tostring(value or 0) end
+        entries[#entries+1]={label=field[1],value=value}
+    end
+    return entries
+end
+
+function UI.layout(career, view, playing, trainIndex, page, statMode)
     view = view or "profile"
     local safe = P.UI.safeArea()
     local width = math.min(480,WIDTH-safe.left-safe.right-28)
@@ -109,6 +152,14 @@ function UI.layout(career, view, playing, trainIndex, page)
         listLayout(l,season and season.schedule(career) or {},page,37)
     elseif view == "standings" then
         listLayout(l,season and season.standings(career) or {},page,34)
+    elseif view=="stats" then
+        l.statMode=statMode or "career"
+        l.statModes={}
+        for i,kind in ipairs(statModes) do
+            local span=width/#statModes
+            l.statModes[i]=box(left+span*(i-.5),l.contentTop-12,span-5,29,kind.label,kind.id)
+        end
+        listLayout(l,report(career,l.statMode),page,35)
     elseif view == "offers" then
         listLayout(l,season and season.offers(career) or {},page,49)
         if not playing then
@@ -255,6 +306,16 @@ local function drawStandings(career,l)
     if #l.rows == 0 then label("Standings appear with the season",l.x,l.contentTop-78,13,muted) end
 end
 
+local function drawStats(l)
+    for _,item in ipairs(l.statModes) do card(item,nil,item.id==l.statMode) end
+    for _,row in ipairs(l.rows) do
+        rectAt(row.item,surface)
+        leading(row.value.label,l.left+11,row.item.y,12,white,l.w-90)
+        label(row.value.value,l.right-43,row.item.y,12,amber,76)
+    end
+    if #l.rows==0 then label("Finish a game to see a box score",l.x,l.contentTop-57,12,muted,l.w-12) end
+end
+
 local function drawOffers(l,playing)
     local title = #l.rows > 0 and "SELECT AN OFFER" or "RECRUITING & CONTRACTS"
     leading(title,l.left+3,l.contentTop-12,11,muted)
@@ -300,6 +361,7 @@ function UI.draw(career,l,playing,editing,draft,message)
 
     if l.view == "schedule" then drawSchedule(l)
     elseif l.view == "standings" then drawStandings(career,l)
+    elseif l.view=="stats" then drawStats(l)
     elseif l.view == "offers" then drawOffers(l,playing)
     else drawOverview(career,l,editing,draft,playing) end
 

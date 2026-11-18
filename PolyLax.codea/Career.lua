@@ -5,9 +5,11 @@ local Career = {}
 P.Career = Career
 
 local saveKey = "PolyLax.Career.1"
-local statKeys = {"goals", "assists", "saves", "groundBalls", "faceoffs",
-    "causedTurnovers", "interceptions", "shots", "completions", "turnovers", "fouls",
-    "screens", "screenAssists", "screenOpenShots", "illegalScreens"}
+local statKeys = {"goals","assists","points","saves","goalsAllowed","shotsFaced",
+    "groundBalls","faceoffs","faceoffsWon","faceoffAttempts","causedTurnovers","interceptions","shots","shotsOnGoal",
+    "passes","completions","turnovers","committedForcedTurnovers","unforcedTurnovers",
+    "fouls","penalties","penaltyMinutes","gamesPlayed","gamesStarted","minutesPlayed",
+    "screens","screenAssists","screenOpenShots","illegalScreens"}
 Career.statKeys = statKeys
 
 Career.positions = {
@@ -48,9 +50,17 @@ local function bounded(value, min, max)
     return math.max(min, math.min(max, math.floor(tonumber(value) or min)))
 end
 
+local function statValue(key,value)
+    value=tonumber(value) or 0
+    if key=="minutesPlayed" or key=="penaltyMinutes" then return math.min(1000000,math.max(0,value)) end
+    return bounded(value,0,1000000)
+end
+
 local function careerStats(stats)
     if type(stats) ~= "table" then stats = {} end
-    for _, key in ipairs(statKeys) do stats[key] = bounded(stats[key], 0, 1000000) end
+    if stats.points==nil then stats.points=(tonumber(stats.goals) or 0)+(tonumber(stats.assists) or 0) end
+    if stats.faceoffsWon==nil then stats.faceoffsWon=stats.faceoffs end
+    for _, key in ipairs(statKeys) do stats[key] = statValue(key,stats[key]) end
     stats.screenCoachPoints = bounded(tonumber(stats.screenCoachPoints) or 0, -1000000, 1000000)
     return stats
 end
@@ -178,11 +188,13 @@ function Career.record(career, fixture, match)
     if not player then return false end
     local nextSave = copy(career)
     nextSave.stats, nextSave.entries = copy(career.stats), copy(career.entries)
-    local personal, oldStats = {}, player.stats or {}
+    local box=P.Statistics.finalize(match)
+    local actual=box and box.players["career-player"]
+    local personal, oldStats = {}, actual and actual.stats or player.stats or {}
     for _, key in ipairs(statKeys) do
         local value = oldStats[key]
         if key == "causedTurnovers" then value = value or oldStats.forcedTurnovers end
-        value = bounded(value, 0, 10000)
+        value=statValue(key,value)
         personal[key] = value
         nextSave.stats[key] = (career.stats[key] or 0) + value
     end
@@ -200,7 +212,7 @@ function Career.record(career, fixture, match)
         + personal.groundBalls * 2 + personal.causedTurnovers * 4 + personal.interceptions * 3
     nextSave.xp = nextSave.xp + earned
     P.Development.onMatch(nextSave,fixture,personal,match)
-    if not P.CareerSeason.record(nextSave, fixture, match, earned, personal, screenEvents) then
+    if not P.CareerSeason.record(nextSave,fixture,match,earned,personal,screenEvents,box) then
         return false, "This result does not match the scheduled game"
     end
     nextSave.entries[fixture.id] = {home=match.homeScore, away=match.awayScore,

@@ -16,6 +16,7 @@
 		<string>Passing</string>
 		<string>Tactics</string>
 		<string>Screens</string>
+		<string>Statistics</string>
 		<string>Gameplay</string>
 		<string>Field</string>
 		<string>Defense</string>
@@ -27,6 +28,7 @@
 		<string>Athlete</string>
 		<string>Career</string>
 		<string>Development</string>
+		<string>StatUI</string>
 		<string>CareerUI</string>
 		<string>CareerSeason</string>
 	</array>

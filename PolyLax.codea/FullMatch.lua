@@ -45,7 +45,7 @@ local function newStats()
         faceoffAttempts=0, faceoffViolations=0, faceoffScrambles=0}
 end
 
-function Match.recordStat(match, index, key, amount)
+function Match.recordStat(match, index, key, amount, detail)
     local player = match.squad[index]
     if not player then return end
     local team = match.stats[player.team]
@@ -54,12 +54,16 @@ function Match.recordStat(match, index, key, amount)
         player.stats[key] = (player.stats[key] or 0) + increment
     end
     team[key] = (team[key] or 0) + increment
+    -- These outcomes use possession/keeper classification at their sources.
+    if key ~= "turnovers" and key ~= "forcedTurnovers" and key ~= "saves" then
+        P.Statistics.record(match,index,key,increment,detail)
+    end
 end
 
 local screenEvaluation = {screens=2, screenAssists=3, screenOpenShots=2, illegalScreens=-4}
 
 local function screenStat(match, index, key, detail)
-    Match.recordStat(match,index,key)
+    Match.recordStat(match,index,key,1,detail)
     local points = screenEvaluation[key]
     if not points then return end
     Match.recordStat(match,index,"screenCoachPoints",points)
@@ -139,6 +143,7 @@ end
 
 local function attach(match, index, select)
     local player = match.squad[index]
+    P.Statistics.possession(match,index)
     local draw = match.faceoffScramble
     if draw then
         local contestant = player.team == 1 and draw.homeId or draw.awayId
@@ -162,6 +167,7 @@ local function freeBall(match, position, velocity, lastTouch)
 end
 
 local function startFaceoff(match)
+    P.Statistics.resetPossession(match)
     local afterPeriod = match.phase == "INTERMISSION"
     P.Screens.reset(match)
     match.tactical, match.cut, match.swingDirection = nil, nil, nil
@@ -213,6 +219,7 @@ local function resetMatch(match)
         player.faceoffFatigue = 0
     end
     match.ai = P.MatchAI.new()
+    P.Statistics.new(match,match.statisticsOptions)
     startFaceoff(match)
 end
 
@@ -250,6 +257,7 @@ function Match.new(scene, profile, homeId, awayId, rules)
         field=field, venueAway=rules.venueAway == true, goalsByTeam=field.goals, goal=vec3(homeGoal.x, homeGoal.top * .5, homeGoal.z),
         ball=makeBall(scene), marker=makeMarker(scene), squad={}, teams={{},{}}, keepers={}, rules=matchRules(rules)
     }
+    match.statisticsOptions = rules.statistics
     local slot = rules and tonumber(rules.careerPlayerSlot)
     if slot then
         match.careerPlayer = clamp(math.floor(slot), 1, 10)
@@ -597,7 +605,11 @@ local function release(match, pending)
         local skill = player.role == "G" and P.Attributes.rating(player,"clearingAccuracy") or nil
         local velocity = 23+((skill or P.Attributes.rating(player,"passing",60))-60)*.12
         flight = P.Passing.launch(match,pending,{speed=velocity,minDuration=.35})
-        Match.recordStat(match,player.id,"passes")
+        Match.recordStat(match,player.id,"passes",1,{target=flight.to,call=pending.play})
+        if player.role == "G" then
+            flight.keeperOutlet = true
+            P.Statistics.record(match,player.id,"clearsAttempted",1,{target=flight.to})
+        end
         match.ballVelocity = flight.velocity
     else
         local goal = match.goalsByTeam[player.team]
@@ -625,8 +637,12 @@ end
 screenFoul = function(match, screenerID, defenderID)
     if match.phase~="LIVE" then return end
     local holder = match.carrier
-    if holder then Match.recordStat(match,holder,"turnovers") end
+    if holder then
+        Match.recordStat(match,holder,"turnovers")
+        P.Statistics.turnover(match,holder,"illegalScreen")
+    end
     Match.recordStat(match,screenerID,"fouls")
+    P.Statistics.penalty(match,screenerID,"technical",0,{reason="illegalScreen",other=defenderID})
     match.pending,match.flight,match.loose,match.scoopPlayer = nil,nil,nil,nil
     match.assist,match.tactical,match.cut = nil,nil,nil
     match.mode = "SET"
@@ -647,13 +663,17 @@ local function completeCheck(match, player)
         Match.recordStat(match, player.id, P.Defense.checks[request.style].stat)
         Match.recordStat(match, player.id, "forcedTurnovers")
         Match.recordStat(match, target.id, "turnovers")
+        P.Statistics.deferTurnover(match,target.id,request.style,player.id)
         announce(match, P.Defense.checks[request.style].name .. " · BALL LOOSE")
     elseif result == "foul" then
         local oldHolder = match.carrier
         if oldHolder and match.squad[oldHolder].team == player.team then
             Match.recordStat(match, oldHolder, "turnovers")
+            P.Statistics.turnover(match,oldHolder,"illegalBodyCheck")
         end
         Match.recordStat(match, player.id, "fouls")
+        -- Assessed time for the arcade box score. The existing foul pause is unchanged.
+        P.Statistics.penalty(match,player.id,"personal",60,{reason="illegalBodyCheck",other=target.id})
         match.pending, match.flight, match.loose, match.scoopPlayer = nil, nil, nil, nil
         local recipient = oldHolder and match.squad[oldHolder].team == target.team and oldHolder or target.id
         match.foul = {recipient=recipient, oldHolder=oldHolder}
@@ -699,6 +719,7 @@ local function trySave(match, flight, previous, position, velocity, hit)
         Match.recordStat(match, keeper.id, "saves")
         Match.recordStat(match, flight.from, "shotsOnGoal")
     end
+    P.Statistics.goalkeeper(match,keeper.id,flight.onTarget and "save" or "block",flight.from)
     if save.style then P.AnimationController.play(keeper.anim, save.style) end
     if save.caught then
         attach(match, keeper.id, false)
@@ -714,12 +735,13 @@ local function score(match, flight, hit)
     local team = flight.team
     Match.recordStat(match, flight.from, "goals")
     Match.recordStat(match, flight.from, "shotsOnGoal")
+    P.Statistics.goalkeeper(match,match.keepers[3-team],"goal",flight.from)
     Match.recordStat(match, flight.from, "score")
     P.Screens.creditGoal(match,flight.from,match.screenStat,flight)
     P.Screens.reset(match)
     local assist = match.assist
     if assist and assist.to == flight.from and match.elapsed-assist.at <= 8 then
-        Match.recordStat(match, assist.from, "assists")
+        Match.recordStat(match, assist.from, "assists",1,{other=flight.from})
     end
     match.assist = nil
     match.homeScore, match.awayScore = match.stats[1].goals, match.stats[2].goals
@@ -747,15 +769,20 @@ local function updateFlight(match, dt, catchIndex)
             Match.recordStat(match, intercepted, "interceptions")
             Match.recordStat(match, intercepted, "forcedTurnovers")
             Match.recordStat(match, flight.from, "turnovers")
+            P.Statistics.turnover(match,flight.from,"interception",intercepted)
             announce(match, "INTERCEPTION")
         elseif P.Passing.canCatch(match,flight,catchIndex,position) then
             attach(match, flight.to, match.controlled == flight.from)
-            Match.recordStat(match, flight.from, "completions")
+            Match.recordStat(match, flight.from, "completions",1,{other=flight.to})
+            if flight.keeperOutlet then
+                P.Statistics.record(match,flight.from,"clearsCompleted",1,{other=flight.to})
+            end
             match.assist = {from=flight.from,to=flight.to,at=match.elapsed}
         elseif progress >= 1 then
             local velocity = P.Passing.endVelocity(match,flight)
             if not flight.to then position.y = ballRadius end
             freeBall(match, position, velocity, flight.team)
+            P.Statistics.deferTurnover(match,flight.from,flight.to and "droppedPass" or "passToSpace")
             announce(match,flight.to and "PASS DROPPED" or "BALL LOOSE")
         end
         return
@@ -773,9 +800,15 @@ local function updateFlight(match, dt, catchIndex)
             return
         elseif hit.kind == "POST" or hit.kind == "CROSSBAR" then
             freeBall(match, hit.position, hit.velocity, flight.team)
+            P.Statistics.record(match,flight.from,"pipeHits",1,{reason=hit.kind})
             announce(match, hit.kind == "POST" and "OFF THE POST" or "OFF THE BAR")
             return
         elseif hit.kind == "WIDE" or hit.kind == "HIGH" or hit.kind == "LOW" then
+            local misses = {WIDE="shotsWide",HIGH="shotsHigh",LOW="shotsLow"}
+            if not flight.missRecorded then
+                P.Statistics.record(match,flight.from,misses[hit.kind])
+                flight.missRecorded = true
+            end
             announce(match, hit.kind)
         end
     end
@@ -856,6 +889,7 @@ local function finishPeriod(match)
     match.phaseTime = 0
     if match.period >= match.rules.periods then
         match.phase = "FINAL"
+        P.Statistics.finalize(match)
         local winner = match.homeScore > match.awayScore and match.homeTeam
             or match.awayScore > match.homeScore and match.awayTeam
         announce(match, winner and winner.name .. " WIN" or "DRAW", 3)
@@ -1010,6 +1044,7 @@ function Match.update(match, dt, moveX, moveZ)
         local liveTime = math.min(dt, match.clock)
         match.clock = math.max(0, match.clock - liveTime)
         match.elapsed = match.elapsed + liveTime
+        P.Statistics.tick(match,liveTime)
         if liveTime > 0 then live(match, liveTime, moveX or 0, moveZ or 0) end
         if match.clock <= 0 and match.phase == "LIVE" then finishPeriod(match) end
     elseif match.phase == "FOUL" then

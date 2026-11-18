@@ -99,6 +99,8 @@ local function pocket(player)
 end
 
 local function resetPlay(game)
+    P.Statistics.resetPossession(game)
+    game.statAssist = nil
     game.carrier, game.controlled = 1, 1
     game.mode, game.clearTime = "SET", 0
     game.pending, game.flight, game.loose = nil, nil, nil
@@ -141,7 +143,7 @@ function Gameplay.applyProfile(game, profile, uniform, opponentId)
     P.Character.apply(game.squad[1].rig, profile, nil, uniform, false)
 end
 
-function Gameplay.new(scene, profile, uniform, opponentId)
+function Gameplay.new(scene, profile, uniform, opponentId, statisticsOptions)
     local Character, Animation = P.Character, P.AnimationController
     uniform = uniform or P.TeamUniform.fromProfile(profile)
     local ball, marker = makeField(scene)
@@ -176,6 +178,16 @@ function Gameplay.new(scene, profile, uniform, opponentId)
     }, nil, P.TeamUniform.forKeeper(uniform, game.goalieRole, game.opponentId), false)
     game.goalie.root.eulerAngles = vec3(0, 180, 0)
     game.goalieAnim = Animation.new(game.goalie)
+    game.statisticsOptions = statisticsOptions
+    game.screenStat = function(id,key,detail)
+        P.Statistics.record(game,id,key,1,detail)
+        if key=="illegalScreens" then
+            P.Statistics.record(game,id,"fouls")
+            P.Statistics.penalty(game,id,"technical",0,detail)
+        end
+    end
+    game.screenCallbacks = {stat=game.screenStat}
+    P.Statistics.new(game,statisticsOptions)
     resetPlay(game)
     return game
 end
@@ -286,6 +298,7 @@ function Gameplay.command(game, command, moveX, moveZ, aim)
         resetPlay(game)
         for _, player in ipairs(game.squad) do player.runningFatigue = 0 end
         game.goals, game.passes, game.clock, game.elapsed = 0, 0, 180, 0
+        P.Statistics.new(game,game.statisticsOptions)
         announce(game, "PRACTICE RESET")
         return
     end
@@ -492,8 +505,29 @@ local function makeLoose(game, position, velocity)
     if game.mode == "SWING" then game.mode = "SET" end
 end
 
-local function beginGoal(game, contact)
+local function finishShotStats(game, flight, scored)
+    if not flight or flight.statsFinished then return end
+    flight.statsFinished = true
+    local keeper = game.statistics.practiceKeeper
+    if scored then
+        P.Statistics.record(game,flight.from,"goals")
+        P.Statistics.record(game,flight.from,"shotsOnGoal")
+        P.Statistics.goalkeeper(game,keeper,"goal",flight.from)
+        local assist = game.statAssist
+        if assist and assist.to==flight.from and game.elapsed-assist.at<=8 then
+            P.Statistics.record(game,assist.from,"assists",1,{other=flight.from})
+        end
+        P.Screens.creditGoal(game,flight.from,game.screenStat,flight)
+    elseif flight.keeperContact then
+        if flight.onTarget then P.Statistics.record(game,flight.from,"shotsOnGoal") end
+        P.Statistics.goalkeeper(game,keeper,flight.onTarget and "save" or "block",flight.from)
+    end
+    game.statAssist = nil
+end
+
+local function beginGoal(game, contact, flight)
     if game.inNet then return end
+    finishShotStats(game,flight,true)
     local fixed = P.GoalPhysics.capture(game.goalPhysics, contact.position)
     game.carrier, game.flight, game.pending, game.loose = nil, nil, nil, nil
     game.scoopPlayer = nil
@@ -511,6 +545,7 @@ local function release(game, pending)
         local speed = 18+(P.Attributes.rating(from,"passing",60)-60)*.12
         flight = P.Passing.launch(game, pending, passFlight, speed)
         game.passes = game.passes + 1
+        P.Statistics.record(game,pending.from,"passes",1,{target=flight.to,call=pending.play})
     else
         local launch = pocket(from)
         flight = {kind="shot", from=pending.from, origin=launch, time=0}
@@ -533,6 +568,14 @@ local function release(game, pending)
         local y = math.max(0, launch.y-ballRadius)
         local vy = flight.velocity.y
         flight.groundTime = (vy+math.sqrt(vy*vy+2*gravity*y))/gravity
+        local time = (goal.z-launch.z) / flight.velocity.z
+        if time>0 and time<=flight.duration and time<=flight.groundTime and flight.canScore then
+            local at = launch + flight.velocity*time - vec3(0,.5*gravity*time*time,0)
+            flight.onTarget = math.abs(at.x-goal.x)<goal.halfWidth-ballRadius
+                and at.y>=ballRadius and at.y<goal.top-ballRadius
+        end
+        P.Statistics.record(game,pending.from,"shots")
+        P.Screens.creditShot(game,pending.from,game.screenStat,flight)
     end
 
     game.pending, game.carrier, game.flight = nil, nil, flight
@@ -546,17 +589,24 @@ local function planScoop(game)
 end
 
 local function attach(game, index)
+    P.Statistics.possession(game,index)
+    if game.loose then finishShotStats(game,game.loose.shot,false) end
+    game.statAssist = nil
     game.carrier, game.controlled = index, index
     game.scoopPlayer, game.loose, game.flight = nil, nil, nil
     game.ball.position = pocket(game.squad[index])
     if game.mode == "SWING" then game.mode = "SET" end
 end
 
-local function rebound(game, contact, canScore)
+local function rebound(game, contact, canScore, flight)
     local position = contact.position + contact.normal * .003
     local y = math.max(ballRadius, position.y)
     makeLoose(game, vec3(position.x,y,position.z), contact.velocity * .65)
-    game.loose.canScore = canScore
+    game.loose.canScore,game.loose.shot = canScore,flight
+    if flight then
+        if contact.kind=="SAVE" then flight.keeperContact=true
+        else P.Statistics.record(game,flight.from,"pipeHits",1,{reason=contact.kind}) end
+    end
     announce(game, contact.kind)
 end
 
@@ -580,12 +630,14 @@ local function updateShot(game, flight, dt)
         if contact then
             local kind = contact.kind
             if kind == "GOAL" and flight.canScore then
-                beginGoal(game, contact)
+                beginGoal(game, contact,flight)
                 return
             elseif kind == "POST" or kind == "CROSSBAR" or kind == "SAVE" then
-                rebound(game, contact, flight.canScore)
+                rebound(game, contact, flight.canScore,flight)
                 return
             elseif kind ~= "GOAL" and flight.canScore then
+                local misses = {WIDE="shotsWide",HIGH="shotsHigh",LOW="shotsLow"}
+                if not flight.miss and misses[kind] then P.Statistics.record(game,flight.from,misses[kind]) end
                 flight.miss = kind
                 announce(game, kind)
             end
@@ -604,7 +656,7 @@ local function updateShot(game, flight, dt)
         local position = game.ball.position
         local velocity = flight.velocity - vec3(0,gravity*flight.time,0)
         makeLoose(game, vec3(position.x,math.max(ballRadius,position.y),position.z), velocity*.26)
-        game.loose.canScore = flight.canScore
+        game.loose.canScore,game.loose.shot = flight.canScore,flight
     end
 end
 
@@ -620,9 +672,13 @@ local function updateFlight(game, dt, catchIndex)
         local autoSelect = game.controlled == flight.from
         local controlled = game.controlled
         attach(game, flight.to)
+        P.Statistics.record(game,flight.from,"completions",1,{other=flight.to})
+        game.statAssist = {from=flight.from,to=flight.to,at=game.elapsed}
         if not autoSelect then game.controlled = controlled end
     elseif flight.time >= flight.duration then
         makeLoose(game, game.ball.position, P.Passing.endVelocity(game, flight))
+        game.statAssist = nil
+        P.Statistics.deferTurnover(game,flight.from,flight.to and "droppedPass" or "passToSpace")
         announce(game, flight.to and "PASS DROPPED" or "BALL TO SPACE")
     end
 end
@@ -651,10 +707,10 @@ local function updateLoose(game, dt, scoopIndex)
     local frame = P.GoalPhysics.step(game.goalPhysics, game.ball.position, nextPosition, v)
     if frame then
         if frame.kind == "GOAL" and loose.canScore then
-            beginGoal(game, frame)
+            beginGoal(game, frame,loose.shot)
             return
         elseif frame.kind == "POST" or frame.kind == "CROSSBAR" then
-            rebound(game, frame, loose.canScore)
+            rebound(game, frame, loose.canScore,loose.shot)
             return
         end
     end
@@ -668,6 +724,7 @@ local function updateLoose(game, dt, scoopIndex)
         local ground = P.Attributes.rating(player,"groundBalls",65)-65
         if y <= .32 and contact.y <= .72 and length(x-contact.x,z-contact.z) <= .73+ground*.004 then
             attach(game, scoopIndex)
+            P.Statistics.record(game,scoopIndex,"groundBalls")
             announce(game, "GROUND BALL")
         end
     end
@@ -686,12 +743,17 @@ function Gameplay.update(game, dt, moveX, moveZ)
         game.ball.position = net.entrance + (net.fixed-net.entrance)*travel
         if game.goalDelay == 0 then
             resetPlay(game)
-            if game.clock <= 0 then announce(game, "PRACTICE COMPLETE", 2) end
+            if game.clock <= 0 then
+                P.Statistics.finalize(game)
+                announce(game, "PRACTICE COMPLETE", 2)
+            end
         end
     end
     if game.clock <= 0 then return end
+    local liveTime = math.min(dt,game.clock)
     game.clock = math.max(0, game.clock - dt)
-    game.elapsed = game.elapsed + dt
+    game.elapsed = game.elapsed + liveTime
+    P.Statistics.tick(game,liveTime)
     local magnitude = math.max(1, length(moveX, moveZ))
     game.moveX, game.moveZ = moveX / magnitude, moveZ / magnitude
 
@@ -732,7 +794,11 @@ function Gameplay.update(game, dt, moveX, moveZ)
         game.ball.position = pocket(game.squad[game.carrier])
     end
 
-    P.Screens.update(game, dt)
+    P.Screens.update(game,dt,game.screenCallbacks)
     game.marker.position = game.squad[game.controlled].rig.root.position
-    if game.clock == 0 and not game.inNet then announce(game, "PRACTICE COMPLETE", 2) end
+    if game.clock == 0 and not game.inNet then
+        finishShotStats(game,game.loose and game.loose.shot,false)
+        P.Statistics.finalize(game)
+        announce(game, "PRACTICE COMPLETE", 2)
+    end
 end
