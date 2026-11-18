@@ -271,14 +271,18 @@ function Match.new(scene, profile, homeId, awayId, rules)
     applyTeamKits(match, homeId, awayId)
     for team = 1, 2 do
         local side = directionFor(team)
+        local roster=P.League and P.League.roster(team==1 and match.homeId or match.awayId)
         for slot, spec in ipairs(formation) do
             local index = #match.squad + 1
             local rig = P.Character.new(scene)
-            local appearance = index == (match.careerPlayer or userPlayer)
-                and profile or playerProfile(team, slot)
+            local custom = index==(match.careerPlayer or userPlayer)
+            local appearance = custom and profile or playerProfile(team,slot)
+            local member = roster and roster[slot]
+            if member and not custom then appearance.NUMBER=member.number+1 end
             P.Character.apply(rig, appearance, nil, match.kits[team], false)
             local player = {
-                id=index, team=team, slot=slot, role=spec[1], name=spec[1]..spec[2],
+                id=index, team=team, slot=slot, role=spec[1],
+                name=member and not custom and member.name or spec[1]..spec[2],
                 rig=rig, anim=P.AnimationController.new(rig), number=rig.numberValue,
                 homeX=spec[3] * -side, homeZ=spec[4] * side,
                 attributes=P.Defense.attributes(spec[1])

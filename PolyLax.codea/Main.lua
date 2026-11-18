@@ -158,8 +158,10 @@ local function openCareerPlay()
         P.CameraController.cycle(camera)
         P.CameraController.cycle(camera)
         local options = P.Career.matchOptions(state.career, fixture)
+        local competition=P.CareerSeason.competition(state.career)
         options.statistics={fixture=fixture,profileId="career-player",stage=state.career.stage,
-            season=state.career.season,postseason=fixture.postseason}
+            season=state.career.season,postseason=fixture.postseason,competition=competition.id,
+            venueId=fixture.venueId,venueHomeId=fixture.homeId}
         options.playerName=P.Athlete.name(state.career)
         local appearance=P.Athlete.profile(state.career,state.profile)
         local game = P.FullMatch.new(scene,appearance,state.career.team,fixture.opponent,options)
@@ -845,7 +847,7 @@ function setup()
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI"
+            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

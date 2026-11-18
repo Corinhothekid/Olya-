@@ -76,7 +76,25 @@ local function listLayout(l, entries, requestedPage, height)
     end
 end
 
-local statModes={{id="career",label="Career"},{id="season",label="Season"},{id="matches",label="Box scores"}}
+local statModes={{id="career",label="Career"},{id="season",label="Season"},
+    {id="matches",label="Box scores"},{id="leaders",label="Leaders"}}
+local leaderCache={}
+
+local function leaders(career)
+    local data=career.seasonData
+    if leaderCache.career==career and leaderCache.data==data then return leaderCache.rows end
+    local rows={}
+    for _,kind in ipairs({{"Goals","goals"},{"Assists","assists"},{"Saves","saves"},
+        {"Ground balls","groundBalls"},{"Caused turnovers","causedTurnovers"},{"Faceoffs","faceoffsWon"}}) do
+        local ranked=P.CareerSeason.leaderboard(career,kind[2])
+        for index=1,math.min(3,#ranked) do
+            local player=ranked[index]
+            rows[#rows+1]={label=kind[1].." · "..player.name,value=tostring(player.value)}
+        end
+    end
+    leaderCache={career=career,data=career.seasonData,rows=rows}
+    return rows
+end
 local statFields={
     {"Games played","gamesPlayed"},{"Starts","gamesStarted"},{"Minutes","minutesPlayed",1},
     {"Goals","goals"},{"Assists","assists"},{"Points","points"},{"Shots","shots"},
@@ -90,6 +108,7 @@ local statFields={
 
 local function report(career,kind)
     local entries={}
+    if kind=="leaders" then return leaders(career) end
     if kind=="matches" then
         local profile=P.Statistics.profile("career-player")
         for index=#profile.order,1,-1 do
@@ -276,10 +295,12 @@ local function drawSchedule(l)
         if fixture.current then rectAt(box(l.left+2,item.y,4,item.h),amber) end
         local venue = fixture.home == false and "AT" or "VS"
         leading(venue.."  "..fixture.opponent,l.left+10,item.y+5,12,white,l.w-106)
-        local detail = fixture.label
-        if fixture.screenCoachPoints then
-            detail = detail..string.format("  ·  Coach %+d",fixture.screenCoachPoints)
-        end
+        local detail=fixture.label
+        if fixture.opponentRecord then
+            local rec=fixture.opponentRecord
+            detail=detail..string.format("  ·  %d–%d–%d",rec.wins,rec.losses,rec.ties)
+        elseif fixture.site then detail=detail.."  ·  "..fixture.site end
+        if fixture.screenCoachPoints then detail=detail..string.format("  ·  Coach %+d",fixture.screenCoachPoints) end
         leading(detail,l.left+10,item.y-8,9,muted,l.w-106)
         local result = fixture.result or (fixture.current and "NEXT" or "—")
         label(result,l.right-44,item.y,11,fixture.current and amber or gameResultTint(result),77)
@@ -373,6 +394,7 @@ function UI.draw(career,l,playing,editing,draft,message)
     if l.play then
         local opponent = l.fixture and teamName(l.fixture.opponent)
         local detail = opponent and ((l.fixture.home == false and "AT " or "VS ")..opponent)
+        if detail and l.fixture.site then detail=detail.."  ·  "..l.fixture.site end
         card(l.play,detail,true)
     elseif l.advance then
         card(l.advance,nil,true)
