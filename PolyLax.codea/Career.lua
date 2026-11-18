@@ -50,7 +50,7 @@ local function bounded(value, min, max)
 end
 
 function Career.new()
-    return {version=1, name="New Player", position=2, stage="highSchool", team=1,
+    return {version=1, name="New Player", position=2, stage="highSchool", team="briarbank",
         season=1, games=0, wins=0, losses=0, ties=0, xp=0, stats={}, entries={},
         attributes=defaults(2)}
 end
@@ -66,6 +66,10 @@ function Career.load()
     if saved.name == "" then saved.name = fresh.name end
     if not Career.stages[saved.stage] then saved.stage = fresh.stage end
     if type(saved.team) ~= "string" and type(saved.team) ~= "number" then saved.team = fresh.team end
+    if saved.stage == "highSchool" then
+        local school = P.SchoolTeams.get(saved.team)
+        if not school or school.group ~= "highSchool" then saved.team = fresh.team end
+    end
     for _, key in ipairs({"games", "wins", "losses", "ties", "xp"}) do
         saved[key] = bounded(saved[key], 0, 1000000)
     end
@@ -103,16 +107,31 @@ function Career.setPosition(career, index)
 end
 
 function Career.teamName(career)
-    return "Showcase roster"
+    return P.TeamUniform.get(career.team).name
+end
+
+function Career.cycleSchool(career)
+    if career.games > 0 or career.stage ~= "highSchool" then return false end
+    local list = P.SchoolTeams.highSchool
+    for index, school in ipairs(list) do
+        if school.id == career.team then
+            career.team = list[index % #list+1].id
+            return Career.save(career)
+        end
+    end
+    return false
 end
 
 function Career.fixture(career)
-    return {id="showcase-" .. (career.games+1), opponent=2, home=true, label="Showcase"}
+    local opponent = P.SchoolTeams.defaultOpponent(career.team)
+    return {id="showcase-" .. (career.games+1), opponent=opponent.id, home=true, label="Showcase"}
 end
 
 function Career.matchOptions(career, fixture)
+    local home = P.TeamUniform.get(career.team)
+    local age = home.ruleset
     return {name="Career short game", periods=2, periodLength=75, intermissionTime=2,
-        ageGroup=career.stage == "highSchool" and "HS" or "adult", bodyContact=true,
+        ageGroup=age, bodyContact=age == "highSchool" or age == "adult",
         careerPlayerSlot=position(career.position).slot, playerName=career.name,
         playerAttributes=copy(career.attributes)}
 end

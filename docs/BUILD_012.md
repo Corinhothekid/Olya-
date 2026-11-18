@@ -33,3 +33,11 @@ Added `Career.lua` and `CareerUI.lua`. Updated `Main.lua`, `UI.lua`, `FullMatch.
 In Codea, open Career from the creator, choose a position, play a career game through the final horn, then return to the menu. Relaunch Codea and confirm the personal stats and result survived. A new character customization affects the same career athlete while ordinary Full Game and Practice remain separate.
 
 Craft mocks passed menu and match entry, all five positions, Player Lock, complete-result saving, and duplicate result protection. Persistence uses Codea's documented JSON and project-local storage.
+
+## Stage 5 · Teams and venues
+
+Added `SchoolTeams.lua` and updated `TeamUniform.lua`, `Field.lua`, `FullMatch.lua`, `Main.lua`, `Career.lua`, `CareerUI.lua`, and the tab order. Six fictional high schools, nine NCAA Division I programs, Florida State's MCLA club, and PLL teams share kits and field configurations. Endline, sideline, and midfield lettering is original game geometry. School color sources are recorded in `SchoolTeams.lua`. Brand and kit combinations are designed for the game. [NCAA Division I men's lacrosse](https://www.ncaa.com/rankings/lacrosse-men/d1/ncaa-mens-lacrosse-rpi) · [Florida State Campus Recreation](https://campusrec.fsu.edu/activities/club-lacrosse-men/)
+
+In Codea, choose a fictional high school before starting Career and inspect the field in Broadcast. Test standard Full Game with different PLL teams. For a direct venue test, pass `"florida-state"` as the first team ID to `FullMatch.new` and inspect its garnet and gold theme.
+
+Lua mocks checked kit contrast, existing PLL IDs, all school theme mesh bounds, and configurable field metrics. The final visual palette, lettering, and frame rate remain to be checked on iPhone.

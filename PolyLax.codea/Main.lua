@@ -138,6 +138,8 @@ local function careerTouch(touch)
         showKeyboard()
     elseif hit(hud.position) and not state.careerPlay then
         P.Career.setPosition(state.career, state.career.position % #P.Career.positions+1)
+    elseif hit(hud.team) and not state.careerPlay then
+        P.Career.cycleSchool(state.career)
     elseif hit(hud.play) then
         finishName()
         openCareerPlay()
@@ -466,7 +468,7 @@ function setup()
         for _, name in ipairs({
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
-            "Defense", "Faceoff", "UI", "Career", "CareerUI"
+            "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

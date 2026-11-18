@@ -216,7 +216,9 @@ function Match.applyProfile(match, profile, homeId, awayId)
 end
 
 function Match.new(scene, profile, homeId, awayId, rules)
-    local field = P.Field.new(scene)
+    rules = rules or {}
+    local venue = P.TeamUniform.get(rules.fieldTeam or homeId)
+    local field = P.Field.new(scene, venue.field, rules.fieldMetrics)
     local homeGoal = field.goals[1]
     local match = {
         field=field, goalsByTeam=field.goals, goal=vec3(homeGoal.x, homeGoal.top * .5, homeGoal.z),

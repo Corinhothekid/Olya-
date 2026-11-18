@@ -1,7 +1,8 @@
--- PolyLax Build 011 Gameplay | PLL team uniforms
+-- PolyLax Build 012 | Shared team uniforms
 PolyLax = PolyLax or {}
+local P = PolyLax
 local TeamUniform = {}
-PolyLax.TeamUniform = TeamUniform
+P.TeamUniform = TeamUniform
 
 local white = color(240, 243, 245)
 local dark = color(26, 29, 37)
@@ -32,6 +33,9 @@ local function team(id, name, short, shopSlug, homeColor, home, away)
         colorSource = "https://shop.premierlacrosseleague.com/products/" ..
             shopSlug .. "-2026-nike-replica-player-jersey",
         approximateRGB = true,
+        fieldType = "professional", ruleset = "adult",
+        field = {id=id, wordmark=name:match(" (%S+)$"), endWordmark=name:match("^(.*) %S+$"),
+            centerWordmark=short, primary=home.primary, accent=home.accent, lettering=home.number},
         home = home, away = away
     }
 end
@@ -66,8 +70,12 @@ TeamUniform.teams = {
 -- Stored jersey indices were green, blue, red, white, black, and gold.
 local priorJerseyTeams = {6, 3, 4, 2, 5, 1}
 
+local function findTeam(id)
+    return TeamUniform.teams[tonumber(id)] or (P.SchoolTeams and P.SchoolTeams.get(id))
+end
+
 function TeamUniform.get(id)
-    return TeamUniform.teams[tonumber(id)] or TeamUniform.teams[1]
+    return findTeam(id) or TeamUniform.teams[1]
 end
 
 function TeamUniform.legacyTeam(jersey)
@@ -86,9 +94,18 @@ local function contrast(a, b)
 end
 
 function TeamUniform.opponent(homeKit, opponentId)
-    local opponent = TeamUniform.get(opponentId or 2)
-    if opponent.id == homeKit.teamId then
-        opponent = TeamUniform.teams[opponent.id % #TeamUniform.teams + 1]
+    local homeId = homeKit.teamId
+    local opponent = findTeam(opponentId)
+    if not opponent or opponent.id == homeId then
+        local school = P.SchoolTeams and P.SchoolTeams.defaultOpponent(homeId)
+        local number = tonumber(homeId)
+        if school then
+            opponent = school
+        elseif number and opponent then
+            opponent = TeamUniform.teams[number % #TeamUniform.teams + 1]
+        else
+            opponent = TeamUniform.teams[number == 2 and 3 or 2]
+        end
     end
     local away, home = opponent.away, opponent.home
     -- The away club may use its colored jersey if white would clash.
@@ -110,4 +127,4 @@ function TeamUniform.forKeeper(uniform, role, opponentId)
     return TeamUniform.opponent(uniform, opponentId)
 end
 
-if PolyLax.Profile then PolyLax.Profile.setTeamOptions(TeamUniform.teams) end
+if P.Profile then P.Profile.setTeamOptions(TeamUniform.teams) end

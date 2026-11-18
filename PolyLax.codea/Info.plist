@@ -5,6 +5,7 @@
 	<key>Buffer Order</key>
 	<array>
 		<string>Main</string>
+		<string>SchoolTeams</string>
 		<string>TeamUniform</string>
 		<string>Profile</string>
 		<string>Character</string>

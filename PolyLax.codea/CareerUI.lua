@@ -63,7 +63,7 @@ function UI.draw(career, l, playing, editing, draft, message)
         card(l.name,"PLAYER NAME")
     end
     card(l.position,"POSITION",false,career.games>0)
-    card(l.team,"TEAM",false,true)
+    card(l.team,"TEAM",false,career.games>0 or playing)
     local y = l.top-275
     label(string.format("RECORD  %d–%d–%d       XP  %d",career.wins,career.losses,career.ties,career.xp),
         l.x,y,13,white)
