@@ -17,3 +17,11 @@ Added `Defense.lua` and updated `FullMatch.lua`, `MatchAI.lua`, and the tab orde
 In Full Game, approach a carrier and try each check, then chase and scoop a dislodged ball. Change `ageGroup` to `"U12"` in the FullMatch rules options for a body-contact foul test. Cross a pass lane to attempt an interception. The age/rules gates use an arcade subset of contact rules.
 
 Lua mocks passed timed check hits and misses, rear/underage body fouls, restarts, scoop recovery, swept interceptions, and a complete shortened match. iPhone input and the new check animations await device testing.
+
+## Stage 3 · Interactive faceoffs
+
+Added `Faceoff.lua` and updated `FullMatch.lua` and the tab order. At the whistle, time Clamp or Counter as the meter crosses its highlighted window. A clean clamp enables a joystick exit. A close contest releases a ground ball to the wings. CPU difficulty, move choice, fatigue, ratings, and input timing affect the outcome.
+
+In Codea, try early, ideal, and late inputs, and try each move against different CPU choices. Steer the exit after a clean win. Confirm wing players pursue a contested ball and that goals and period breaks return to the same faceoff sequence.
+
+Deterministic Lua and Craft mocks passed timed choices, early calls, rating/fatigue effects, directional exits, contested wing recovery, animation contact, game clock, and both restart paths.

@@ -41,7 +41,8 @@ end
 local function newStats()
     return {goals=0, score=0, shots=0, shotsOnGoal=0, saves=0, passes=0,
         completions=0, groundBalls=0, faceoffs=0, checks=0, turnovers=0,
-        pokes=0, slaps=0, bodyChecks=0, interceptions=0, forcedTurnovers=0, fouls=0}
+        pokes=0, slaps=0, bodyChecks=0, interceptions=0, forcedTurnovers=0, fouls=0,
+        faceoffAttempts=0, faceoffViolations=0, faceoffScrambles=0}
 end
 
 function Match.recordStat(match, index, key, amount)
@@ -56,6 +57,7 @@ end
 local function matchRules(options)
     options = options or {}
     local ageGroup, bodyContact = P.Defense.configure(options)
+    local faceoffOptions = type(options.faceoff) == "table" and options.faceoff or {}
     return {
         name = options.name or "Arcade testing",
         periods = math.floor(clamp(tonumber(options.periods) or 4, 1, 8)),
@@ -63,7 +65,12 @@ local function matchRules(options)
         intermissionTime = clamp(tonumber(options.intermissionTime) or 2.4, .4, 12),
         goalTime = clamp(tonumber(options.goalTime) or 1.7, .6, 5),
         foulTime = clamp(tonumber(options.foulTime) or 1.05, .4, 5),
-        ageGroup = ageGroup, bodyContact = bodyContact
+        ageGroup = ageGroup, bodyContact = bodyContact,
+        faceoff = {
+            difficulty = faceoffOptions.difficulty or options.faceoffDifficulty,
+            setTime = faceoffOptions.setTime, duration = faceoffOptions.duration,
+            exitTime = faceoffOptions.exitTime
+        }
     }
 end
 
@@ -107,8 +114,20 @@ local function place(player)
     player.rig.root.eulerAngles = vec3(0, player.yaw, 0)
 end
 
+local function careerLock(match)
+    local id = match.playerId or match.careerPlayer
+    if type(id) == "table" then id = id.id end
+    if type(id) == "number" and match.squad[id] then return id end
+end
+
 local function attach(match, index, select)
     local player = match.squad[index]
+    local draw = match.faceoffScramble
+    if draw then
+        local contestant = player.team == 1 and draw.homeId or draw.awayId
+        Match.recordStat(match, contestant, "faceoffs")
+        match.faceoffScramble = nil
+    end
     match.carrier, match.lastTouch = index, player.team
     match.flight, match.loose, match.pending = nil, nil, nil
     match.scoopPlayer = nil
@@ -126,18 +145,30 @@ local function freeBall(match, position, velocity, lastTouch)
 end
 
 local function startFaceoff(match)
+    local afterPeriod = match.phase == "INTERMISSION"
     match.phase, match.phaseTime = "FACEOFF", 0
     match.mode, match.clearTime = "SET", 0
     match.pending, match.flight, match.loose, match.carrier = nil, nil, nil, nil
     match.scoopPlayer, match.lastTouch, match.inNet = nil, nil, nil
     match.foul = nil
-    match.faceoff = {}
-    match.controlled = userPlayer
+    match.faceoffScramble = nil
+    local first = match.squad[match.teams[1][4]]
+    local second = match.squad[match.teams[2][4]]
+    local locked = careerLock(match)
+    match.controlled = locked or first.id
+    match.faceoffSerial = match.faceoffSerial + 1
+    if afterPeriod then
+        first.faceoffFatigue = math.max(0, first.faceoffFatigue - .15)
+        second.faceoffFatigue = math.max(0, second.faceoffFatigue - .15)
+    end
+    match.faceoff = P.Faceoff.new(match.rules.faceoff, first, second, match.faceoffSerial,
+        (not locked or locked == first.id) and 1 or false)
     local reset = P.AnimationController.reset
     for _, player in ipairs(match.squad) do
         player.x, player.z = player.homeX, player.homeZ
         player.vx, player.vz, player.speed, player.turn = 0, 0, 0, 0
         player.dodge, player.check, player.checkCooldown = nil, nil, 0
+        player.faceoffExit = nil
         player.yaw = player.team == 1 and 0 or 180
         if player.role == "G" then player.yaw = (player.yaw + 180) % 360 end
         if player.slot == 4 then player.z = -.62 * directionFor(player.team) end
@@ -147,14 +178,18 @@ local function startFaceoff(match)
     match.ball.position, match.ballVelocity = vec3(0, ballRadius, 0), vec3()
     for _, goal in ipairs(match.goalsByTeam) do P.GoalPhysics.reset(goal) end
     match.marker.position = match.squad[match.controlled].rig.root.position
-    announce(match, "FACEOFF", .74)
+    announce(match, "FACEOFF", match.faceoff.setTime)
 end
 
 local function resetMatch(match)
     match.homeScore, match.awayScore = 0, 0
     match.period, match.clock, match.elapsed = 1, match.rules.periodLength, 0
     match.stats = {newStats(), newStats()}
-    for _, player in ipairs(match.squad) do player.stats = newStats() end
+    match.faceoffSerial = 0
+    for _, player in ipairs(match.squad) do
+        player.stats = newStats()
+        player.faceoffFatigue = 0
+    end
     match.ai = P.MatchAI.new()
     startFaceoff(match)
 end
@@ -188,6 +223,7 @@ function Match.new(scene, profile, homeId, awayId, rules)
     }
     P.MatchAI.registerAnimations()
     P.Defense.registerAnimations()
+    P.Faceoff.registerAnimations(P.AnimationController)
     applyTeamKits(match, homeId, awayId)
     for team = 1, 2 do
         local side = directionFor(team)
@@ -202,6 +238,7 @@ function Match.new(scene, profile, homeId, awayId, rules)
                 homeX=spec[3] * -side, homeZ=spec[4] * side,
                 attributes=P.Defense.attributes(spec[1])
             }
+            if slot == 4 then player.attributes.faceoff = .68 end
             match.squad[index] = player
             match.teams[team][slot] = index
             if player.role == "G" then match.keepers[team] = index end
@@ -285,11 +322,9 @@ function Match.command(match, action, moveX, moveZ, aim)
         return
     end
     if match.phase == "FACEOFF" then
-        if (action == "faceoff" or action == "pass" or action == "shoot")
-            and not match.faceoff.winner then
-            local time = match.phaseTime
-            match.faceoff.winner = time >= .74 and time <= 1.18 and 1 or 2
-            if time < .74 then announce(match, "EARLY CLAMP") end
+        if action == "pass" or action == "shoot" then action = "clamp" end
+        if P.Faceoff.input(match.faceoff, action) and match.faceoff.phase == "SET" then
+            announce(match, "FALSE START")
         end
         return
     end
@@ -323,6 +358,14 @@ end
 local function drive(match, player, vx, vz, dt)
     local dodge = player.dodge
     local acceleration = 24
+    local exit = player.faceoffExit
+    if exit then
+        exit.remaining = exit.remaining - dt
+        local speed = 4.5 + 2 * math.max(0, exit.remaining) / .25
+        vx, vz = exit.x * speed, exit.z * speed
+        acceleration = 36
+        if exit.remaining <= 0 then player.faceoffExit = nil end
+    end
     if dodge then
         local burst = 8.6 + 3.1 * dodge.time / .29
         vx, vz, acceleration = dodge.x * burst, dodge.z * burst, 52
@@ -349,6 +392,10 @@ local function drive(match, player, vx, vz, dt)
     player.x, player.z = targetX, targetZ
     player.vx, player.vz = (targetX - x) / dt, (targetZ - z) / dt
     player.speed = distance(player.vx, player.vz)
+    if player.slot == 4 then
+        local effort = (player.speed - 4.2) * .005
+        player.faceoffFatigue = clamp(player.faceoffFatigue + effort * dt, 0, .55)
+    end
 end
 
 local function movePlayers(match, dt, moveX, moveZ, intents)
@@ -668,32 +715,88 @@ local function finishPeriod(match)
     end
 end
 
-local function faceoff(match, dt)
-    local contest = match.faceoff
+local function updateDrawActor(player, entry, dt, ballPosition, collecting)
+    local animation = P.AnimationController
+    if entry.action and not entry.animated then
+        local clip = entry.action == "counter" and "faceoffCounter" or "faceoffClamp"
+        entry.animated = animation.play(player.anim, clip)
+    end
+    if collecting and not entry.collecting then
+        entry.collecting = animation.play(player.anim, "scoop")
+    end
+    return animation.update(player.anim, dt, {
+        scoopPoint = entry.collecting and ballPosition or nil
+    })
+end
+
+local function faceoff(match, dt, moveX, moveZ)
+    local draw = match.faceoff
+    local previous = draw.phase
     match.phaseTime = match.phaseTime + dt
-    if not contest.signaled and match.phaseTime >= .74 and not contest.winner then
-        contest.signaled = true
-        announce(match, "CLAMP NOW", .45)
+    P.Faceoff.update(draw, dt, moveX, moveZ)
+    if previous == "SET" and draw.phase == "DRAW" and draw.userTeam and not draw.home.action then
+        announce(match, "TIME YOUR CLAMP", .44)
     end
-    if not contest.winner and match.phaseTime >= 1.18 then contest.winner = 2 end
-    local update, play = P.AnimationController.update, P.AnimationController.play
-    local first, second = match.squad[userPlayer], match.squad[match.teams[2][4]]
-    if contest.winner and not contest.started then
-        contest.started = match.phaseTime
-        play(first.anim, "scoop")
-        play(second.anim, "scoop")
+    local first, second = match.squad[draw.home.id], match.squad[draw.away.id]
+    local result = draw.result
+    local winner = result and result.winner
+    local ballPosition = match.ball.position
+    local firstEvent = updateDrawActor(first, draw.home, dt, ballPosition, winner == 1)
+    local secondEvent = updateDrawActor(second, draw.away, dt, ballPosition, winner == 2)
+    if winner == 1 and firstEvent == "scoop" or winner == 2 and secondEvent == "scoop" then
+        draw.contact = true
     end
-    local firstEvent = update(first.anim, dt, {scoopPoint=match.ball.position})
-    local secondEvent = update(second.anim, dt, {scoopPoint=match.ball.position})
-    local event = secondEvent
-    if contest.winner == 1 then event = firstEvent end
-    if contest.started and (event == "scoop" or match.phaseTime - contest.started > .65) then
-        local team = contest.winner
-        local winner = team == 1 and first or second
-        attach(match, winner.id, true)
-        match.phase, match.phaseTime = "LIVE", 0
-        Match.recordStat(match, winner.id, "faceoffs")
-        announce(match, (team == 1 and match.homeTeam.short or match.awayTeam.short) .. " FACEOFF WIN")
+
+    if previous ~= "EXIT" and draw.phase == "EXIT" then
+        if result.loose then announce(match, "CONTESTED DRAW")
+        elseif winner == draw.userTeam then announce(match, "STEER THE EXIT", draw.exitTime + .20) end
+    end
+    if draw.active then return end
+    if winner and not draw.contact
+        and match.phaseTime < draw.setTime + draw.duration + draw.exitTime + .65 then return end
+
+    Match.recordStat(match, first.id, "faceoffAttempts")
+    Match.recordStat(match, second.id, "faceoffAttempts")
+    if result.cause == "FALSE_START" then
+        local offender = winner == 1 and second or first
+        Match.recordStat(match, offender.id, "faceoffViolations")
+    end
+    if result.loose then
+        Match.recordStat(match, first.id, "faceoffScrambles")
+        Match.recordStat(match, second.id, "faceoffScrambles")
+        local x, z = result.exitX, result.exitZ
+        local wingSlot = x < 0 and 5 or 6
+        match.faceoffScramble = {
+            homeId=first.id, awayId=second.id, time=2.4,
+            wings={match.teams[1][wingSlot], match.teams[2][11 - wingSlot]}
+        }
+        freeBall(match, vec3(x * .16, ballRadius, z * .16), vec3(x * 5.6, .42, z * 5.6))
+        announce(match, "LOOSE DRAW")
+    else
+        local player = winner == 1 and first or second
+        attach(match, player.id, not careerLock(match))
+        player.faceoffExit = {x=result.exitX, z=result.exitZ, remaining=.25}
+        Match.recordStat(match, player.id, "faceoffs")
+        local team = winner == 1 and match.homeTeam or match.awayTeam
+        announce(match, team.short .. " FACEOFF WIN")
+    end
+    match.phase, match.phaseTime = "LIVE", 0
+end
+
+local function pursueDraw(match, intents, dt)
+    local draw = match.faceoffScramble
+    if not draw or draw.time <= 0 or not match.loose then return end
+    draw.time = draw.time - dt
+    local ball, velocity = match.ball.position, match.ballVelocity
+    for _, index in ipairs(draw.wings) do
+        local wing = match.squad[index]
+        local sign = wing.homeX >= 0 and 1 or -1
+        local intent = intents[index]
+        if intent then
+            -- Enter from the flank so both wings leave a lane for the faceoff players.
+            intent.x, intent.z = ball.x + velocity.x * .3 + sign * .8, ball.z + velocity.z * .3
+            intent.lookX, intent.lookZ, intent.speed = ball.x, ball.z, 7.8
+        end
     end
 end
 
@@ -706,6 +809,7 @@ local function live(match, dt, moveX, moveZ)
         if match.clearTime == 0 and match.mode == "CLEAR" then match.mode = "SET" end
     end
     local intents = P.MatchAI.update(match, dt)
+    pursueDraw(match, intents, dt)
     act(match, intents)
     planCatch(match, dt)
     if match.flight then P.Defense.prepareIntercept(match, match.flight) end
@@ -744,7 +848,7 @@ function Match.update(match, dt, moveX, moveZ)
     match.announcementTime = math.max(0, match.announcementTime - dt)
     for _, goal in ipairs(match.goalsByTeam) do P.GoalPhysics.update(goal, dt) end
     if match.phase == "FACEOFF" then
-        faceoff(match, dt)
+        faceoff(match, dt, moveX, moveZ)
     elseif match.phase == "LIVE" then
         local liveTime = math.min(dt, match.clock)
         match.clock = math.max(0, match.clock - liveTime)
