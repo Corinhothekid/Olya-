@@ -42,7 +42,9 @@ local function overview(l, career, playing, training)
     l.summary = box(center,top-134*fit,width,76*fit)
     l.statsY = top-185*fit
     l.screenStats = box(center,top-225*fit,width,62*fit)
-    if training then
+    if P.Development then
+        l.development=box(center,top-286*fit,width,43*fit,"Player development","development")
+    elseif training then
         l.nextSkill = box(l.left+column*.5,top-286*fit,column,43*fit,training.label,"nextSkill")
         l.train = box(l.right-column*.5,top-286*fit,column,43*fit,"Train +"..(training.gain or 1),training.key)
         l.train.enabled = training.available and not playing or false
@@ -117,7 +119,7 @@ function UI.layout(career, view, playing, trainIndex, page)
             end
         end
     else
-        overview(l,career,playing,season and season.training(career,trainIndex or 1))
+        overview(l,career,playing,not P.Development and season and season.training(career,trainIndex or 1))
     end
     return l
 end
@@ -136,7 +138,8 @@ end
 local function rectAt(item,tint)
     rectMode(CENTER)
     fill(tint)
-    rect(item.x,item.y,item.w,item.h)
+    if P.Style then P.Style.rounded(item.x,item.y,item.w,item.h,9,tint)
+    else rect(item.x,item.y,item.w,item.h) end
 end
 
 local function leading(value,x,y,size,tint,maxWidth)
@@ -197,7 +200,10 @@ local function drawOverview(career,l,editing,draft,playing)
         stats.goals or 0,stats.assists or 0,stats.groundBalls or 0,stats.causedTurnovers or 0,
         stats.saves or 0,stats.faceoffs or 0),l.x,l.statsY,11,white,l.w-10)
     drawScreenStats(l,stats,status)
-    if l.training then
+    if l.development then
+        local overall=P.Attributes.overall(career.attributes,career.position)
+        card(l.development,string.format("OVR %d  ·  %d SP",overall,P.Development.points(career)),true)
+    elseif l.training then
         local training = l.training
         card(l.nextSkill,"SKILL  "..tostring(training.value).."   ›",false)
         local cost = training.available and ("COST  "..tostring(training.cost).." XP")

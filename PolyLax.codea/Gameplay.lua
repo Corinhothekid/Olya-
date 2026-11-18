@@ -164,7 +164,8 @@ function Gameplay.new(scene, profile, uniform, opponentId)
         }, nil, uniform, false)
         game.squad[i] = {
             id=i, team=1, role=i <= 3 and "M" or "A", slot=i,
-            homeX=anchor.x, homeZ=anchor.z, rig=rig, anim=Animation.new(rig), name=anchor.name
+            homeX=anchor.x, homeZ=anchor.z, rig=rig, anim=Animation.new(rig), name=anchor.name,
+            attributes=i == 1 and profile and profile.attributes or nil
         }
     end
 
@@ -243,7 +244,8 @@ end
 
 local function startDodge(game, moveX, moveZ)
     local player = game.squad[game.controlled]
-    if not P.AnimationController.play(player.anim, "dodge") then return end
+    local agility = P.Attributes.rating(player,"agility",60)-60
+    if not P.AnimationController.play(player.anim, "dodge", 1+agility*.004) then return end
 
     local dx, dz = moveX, -moveZ
     local magnitude = length(dx, dz)
@@ -253,7 +255,7 @@ local function startDodge(game, moveX, moveZ)
         dx, dz = direction * math.cos(yaw), -direction * math.sin(yaw)
         magnitude = 1
     end
-    player.dodge = {x = dx / magnitude, z = dz / magnitude, time = .31}
+    player.dodge = {x=dx/magnitude, z=dz/magnitude, time=.31, agility=agility}
 end
 
 local function startScoop(game, index, reach)
@@ -261,9 +263,10 @@ local function startScoop(game, index, reach)
     local position = game.ball.position
     local velocity = game.loose.velocity
     local player = game.squad[index]
+    local ground = P.Attributes.rating(player,"groundBalls",65)-65
     if position.y > .26 or length(velocity.x, velocity.z) > 2.7
-        or length(position.x - player.x, position.z - player.z) > reach then return false end
-    if not P.AnimationController.play(player.anim, "scoop") then return false end
+        or length(position.x - player.x, position.z - player.z) > reach+ground*.005 then return false end
+    if not P.AnimationController.play(player.anim, "scoop", 1+ground*.0038) then return false end
     game.scoopPlayer = index
     return true
 end
@@ -281,6 +284,7 @@ end
 function Gameplay.command(game, command, moveX, moveZ, aim)
     if command == "reset" then
         resetPlay(game)
+        for _, player in ipairs(game.squad) do player.runningFatigue = 0 end
         game.goals, game.passes, game.clock, game.elapsed = 0, 0, 180, 0
         announce(game, "PRACTICE RESET")
         return
@@ -391,7 +395,7 @@ local function movePlayers(game, dt)
         local screenControl = screen and screen.screenControl
         player.screenIntent = screen
         if index == game.controlled and not screenControl and (manual or not (cutting or receiveX)) then
-            local speed = game.sprinting and 8.3 or 6.1
+            local speed = P.Attributes.pace(player,game.sprinting and 8.3 or 6.1)
             vx, vz = game.moveX * speed, -game.moveZ * speed
         elseif index ~= game.carrier or screenControl then
             local tx, tz = offBallTarget(game, index, carrierX, carrierZ)
@@ -415,26 +419,28 @@ local function movePlayers(game, dt)
             local dx, dz = tx - player.x, tz - player.z
             local distance = length(dx, dz)
             if distance > .08 then
-                local speed = math.min(distance * 3, limit)
+                local speed = math.min(distance*3, limit > 0 and P.Attributes.pace(player,limit) or 0)
                 vx, vz = dx * speed / distance, dz * speed / distance
             end
         end
 
         local dodge = player.dodge
         if dodge then
-            local burst = 6.8 + 3 * dodge.time / .31
+            local burst = 6.8+3*dodge.time/.31+(dodge.agility or 0)*.033
             vx, vz = dodge.x * burst, dodge.z * burst
             dodge.time = dodge.time - dt
             if dodge.time <= 0 then player.dodge = nil end
         end
 
         local dvx, dvz = vx - player.vx, vz - player.vz
-        local accel = math.min(1, (dodge and 43 or 19) * dt / math.max(.001, length(dvx, dvz)))
+        local acceleration = dodge and 43 or 19+(P.Attributes.rating(player,"acceleration",60)-60)*.16
+        local accel = math.min(1, acceleration*dt/math.max(.001,length(dvx,dvz)))
         local oldX, oldZ = player.x, player.z
         player.x = clamp(oldX + (player.vx + accel * dvx) * dt, minX, maxX)
         player.z = clamp(oldZ + (player.vz + accel * dvz) * dt, minZ, maxZ)
         player.vx, player.vz = (player.x - oldX) / dt, (player.z - oldZ) / dt
         player.speed = length(player.vx, player.vz)
+        P.Attributes.updateFatigue(player,dt)
     end
 
     for index, player in ipairs(game.squad) do
@@ -454,11 +460,12 @@ local function movePlayers(game, dt)
                 (holder and holder ~= player and carrierZ or goalZ) - player.z
         end
         local rotation = 0
+        local turnRate = 540+(P.Attributes.rating(player,"agility",60)-60)*3.1
         if length(lookX, lookZ) > .04 then
-            rotation = clamp(angleDifference(facing(lookX, lookZ), player.yaw), -540 * dt, 540 * dt)
+            rotation = clamp(angleDifference(facing(lookX, lookZ), player.yaw), -turnRate*dt, turnRate*dt)
         end
         player.yaw = (player.yaw + rotation) % 360
-        player.turn = rotation / (540 * dt)
+        player.turn = rotation / (turnRate*dt)
         player.rig.root.position = vec3(player.x, 0, player.z)
         player.rig.root.eulerAngles = vec3(0, player.yaw, 0)
     end
@@ -499,11 +506,12 @@ end
 
 local function release(game, pending)
     local flight
+    local from = game.squad[pending.from]
     if pending.kind == "pass" then
-        flight = P.Passing.launch(game, pending, passFlight)
+        local speed = 18+(P.Attributes.rating(from,"passing",60)-60)*.12
+        flight = P.Passing.launch(game, pending, passFlight, speed)
         game.passes = game.passes + 1
     else
-        local from = game.squad[pending.from]
         local launch = pocket(from)
         flight = {kind="shot", from=pending.from, origin=launch, time=0}
         local aim = (pending.aim + game.moveX) * .5
@@ -511,7 +519,11 @@ local function release(game, pending)
         local targetX = game.goalieX <= goal.x and goal.x+.69 or goal.x-.69
         if math.abs(aim) > .16 then targetX = goal.x + aim * 1.45 end
         local target = pending.target or vec3(targetX, 1.12 + from.speed*.018, goal.z)
-        local crossingTime = clamp(length(target.x-launch.x, target.z-launch.z) / 23, .15, 1.05)
+        local span = length(target.x-launch.x,target.z-launch.z)
+        local spreadX,spreadY = P.Attributes.shotSpread(game,from,span)
+        target = target+vec3(spreadX,spreadY,0)
+        local velocity = 23+(P.Attributes.rating(from,"shotPower",60)-60)*.15
+        local crossingTime = clamp(span/velocity,.15,1.05)
         flight.duration = crossingTime + .32
         flight.velocity = (target-launch)/crossingTime + vec3(0, .5*gravity*crossingTime, 0)
         if pending.target then
@@ -653,7 +665,8 @@ local function updateLoose(game, dt, scoopIndex)
         local player = game.squad[scoopIndex]
         game.scoopPlayer = nil
         local contact = pocket(player)
-        if y <= .32 and contact.y <= .72 and length(x - contact.x, z - contact.z) <= .73 then
+        local ground = P.Attributes.rating(player,"groundBalls",65)-65
+        if y <= .32 and contact.y <= .72 and length(x-contact.x,z-contact.z) <= .73+ground*.004 then
             attach(game, scoopIndex)
             announce(game, "GROUND BALL")
         end

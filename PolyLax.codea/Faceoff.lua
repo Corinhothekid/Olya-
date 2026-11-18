@@ -1,7 +1,8 @@
 -- PolyLax Build 012 | Timing, clamp counters, and draw exits
 PolyLax = PolyLax or {}
+local P = PolyLax
 local Faceoff = {}
-PolyLax.Faceoff = Faceoff
+P.Faceoff = Faceoff
 
 local difficulties = {
     EASY = {center = .28, spread = .26, technique = -.09, counter = .24},
@@ -27,14 +28,13 @@ local function normalized(value, default)
 end
 
 local function contestant(player, human)
-    local attributes = player and player.attributes
-    local rating = player and player.faceoffRating or attributes and attributes.faceoff
-    local stamina = player and player.stamina or attributes and attributes.stamina
+    local rating = normalized(player and player.faceoffRating,P.Attributes.unit(player,"faceoff",.65))
+    local stamina = normalized(player and player.stamina,P.Attributes.unit(player,"stamina",1))
     local fatigue = player and player.faceoffFatigue
     return {
         id = player and player.id,
-        rating = normalized(rating, .65),
-        stamina = clamp(normalized(stamina, 1) - normalized(fatigue, 0), 0, 1),
+        rating = rating,
+        stamina = clamp(stamina-normalized(fatigue,0),0,1),
         human = human
     }
 end

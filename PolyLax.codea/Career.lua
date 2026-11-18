@@ -37,9 +37,7 @@ local function copy(source)
 end
 
 local function defaults(index)
-    local attributes = copy(baseAttributes)
-    for key, value in pairs(position(index).attributes) do attributes[key] = value end
-    return attributes
+    return P.Attributes.forPosition(index)
 end
 
 local function nameOf(value)
@@ -98,13 +96,7 @@ function Career.load()
         saved.contract = nil
     end
     saved.history = type(saved.history) == "table" and saved.history or {}
-    local attributes = defaults(saved.position)
-    for key in pairs(attributes) do
-        if type(saved.attributes) == "table" and type(saved.attributes[key]) == "number" then
-            attributes[key] = bounded(saved.attributes[key], 1, 99)
-        end
-    end
-    saved.attributes = attributes
+    saved.attributes=P.Attributes.restore(saved.attributes,saved.position)
     saved.stats = careerStats(saved.stats)
     saved.entries = type(saved.entries) == "table" and saved.entries or {}
     return saved
@@ -207,6 +199,7 @@ function Career.record(career, fixture, match)
         + personal.assists * 5 + personal.saves * 3 + personal.faceoffs * 4
         + personal.groundBalls * 2 + personal.causedTurnovers * 4 + personal.interceptions * 3
     nextSave.xp = nextSave.xp + earned
+    P.Development.onMatch(nextSave,fixture,personal,match)
     if not P.CareerSeason.record(nextSave, fixture, match, earned, personal, screenEvents) then
         return false, "This result does not match the scheduled game"
     end

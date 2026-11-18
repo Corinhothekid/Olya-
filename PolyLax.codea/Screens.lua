@@ -26,8 +26,7 @@ local function speed(actor)
 end
 
 local function attribute(player, key, fallback)
-    local value = tonumber(player.attributes and player.attributes[key]) or fallback
-    return clamp(value > 1 and value / 100 or value, .05, 1)
+    return clamp(P.Attributes.unit(player,key,fallback),.05,1)
 end
 
 local function frame(time, grip, shaft, torso, crouch, roll)

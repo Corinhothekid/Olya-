@@ -81,11 +81,8 @@ local function catchOffset(receiver, source, x, z)
 end
 
 local function dispersion(game, pending, sender, origin, point, range)
-    local attributes = sender.attributes or {}
     local clear = sender.role == "G" or pending.call == "CLEAR"
-    local skill = tonumber(clear and attributes.clearingAccuracy or attributes.passing) or .66
-    if skill > 1 then skill = skill/100 end
-    skill = clamp(skill, 0, 1)
+    local skill = P.Attributes.unit(sender, clear and "clearingAccuracy" or "passing", .66)
 
     local pressure = 0
     for _, player in ipairs(game.squad) do
@@ -104,13 +101,13 @@ local function dispersion(game, pending, sender, origin, point, range)
     return vec3((-z*sideways+x*forward)/span, 0, (x*sideways+z*forward)/span)
 end
 
-function Passing.launch(game, pending, options)
+function Passing.launch(game, pending, options, speedOverride)
     options = options or {}
     local sender = game.squad[pending.from]
     local receiver = pending.to and game.squad[pending.to]
     local origin = sender.rig.pocket.worldPosition
     local point = receiver and receiver.rig.pocket.worldPosition or pending.point
-    local speed = options.speed or 20
+    local speed = speedOverride or options.speed or 20
     local distance = length(point.x-origin.x, point.z-origin.z)
     local duration = clamp(distance / speed, options.minDuration or .34, options.maxDuration or 2.4)
 
@@ -145,8 +142,10 @@ end
 function Passing.receiveTarget(game, index)
     local flight = game.flight
     if not flight or flight.kind ~= "pass" or not flight.point
-        or flight.to ~= index or flight.duration-flight.time > .85 then return end
+        or flight.to ~= index then return end
     local receiver = game.squad[index]
+    local readTime = .85+(P.Attributes.rating(receiver,"lacrosseIQ",60)-60)*.006
+    if flight.duration-flight.time > readTime then return end
     local offset = catchOffset(receiver, flight.origin, receiver.x, receiver.z)
     return flight.point.x-offset.x, flight.point.z-offset.z
 end
@@ -172,5 +171,7 @@ function Passing.canCatch(game, flight, index, position)
     if not index or index ~= flight.to then return false end
     local receiver = game.squad[index]
     local gap = position - receiver.rig.pocket.worldPosition
-    return gap:len() <= .82
+    local control = receiver.attributes and receiver.attributes.ballControl
+    local reach = .82+(control and P.Attributes.rating(receiver,"ballControl",65)-65 or 0)*.004
+    return gap:len() <= reach
 end

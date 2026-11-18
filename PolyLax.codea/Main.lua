@@ -184,6 +184,87 @@ local function careerLayout()
         state.careerSkill, state.careerPage)
 end
 
+local function openDevelopment()
+    clearPlayInput()
+    navigate("DEVELOPMENT")
+    state.developmentPage=state.developmentPage or 1
+end
+
+local function trainingKey(mode)
+    local fixture=P.Career.fixture(state.career)
+    return mode..":"..(fixture and fixture.id or (state.career.stage..":"..state.career.season))
+end
+
+local function openTraining()
+    local key=trainingKey("drill")
+    if P.Development.claimed(state.career,key) then
+        state.developmentMessage="Drill objective logged this week"
+        return
+    end
+    if not state.training or state.training.rewardKey~=key then
+        local scene=configuredScene()
+        local profile=P.Athlete.profile(state.career,state.profile)
+        local kit=P.Athlete.uniform(state.career,false)
+        local game=P.Gameplay.new(scene,profile,kit,state.profile.OPPONENT)
+        game.clock=60
+        game.squad[1].attributes=P.Attributes.restore(state.career.attributes,state.career.position)
+        game.announcement,game.announcementTime="TRAINING · 1 GOAL + 2 PASSES",3
+        state.training={scene=scene,game=game,camera=P.CameraController.new(scene,48),rewardKey=key}
+    end
+    clearPlayInput()
+    navigate("TRAINING")
+end
+
+local function resetPlaySession(play,controller,page)
+    controller.command(play.game,"reset")
+    if page=="TRAINING" then play.game.clock=60 end
+    play.rewardAttempted=nil
+end
+
+local function updateTrainingReward(play,page)
+    if play.rewardAttempted or play.game.clock>0 then return end
+    play.rewardAttempted=true
+    local game=play.game
+    if game.goals<1 or game.passes<2 then
+        if page=="TRAINING" then state.developmentMessage="Drill goal was 1 goal and 2 passes" end
+        return
+    end
+    local drill=page=="TRAINING"
+    local key=drill and play.rewardKey or trainingKey("practice")
+    local saved,message=P.Development.reward(state.career,key,drill and 32 or 18,drill and 8 or 3)
+    state.developmentMessage=message
+    if saved then
+        game.announcement,game.announcementTime="DEVELOPMENT REWARD EARNED",4
+    end
+end
+
+local function developmentTouch(touch)
+    if touch.state~=BEGAN then return end
+    local l=P.Development.layout(state.career,state.developmentPage)
+    local function hit(item) return item and item.enabled~=false and P.UI.hit(item,touch.x,touch.y) end
+    if hit(l.back) then openCareer()
+    elseif hit(l.previous) then state.developmentPage=l.page-1
+    elseif hit(l.next) then state.developmentPage=l.page+1
+    elseif hit(l.drill) then openTraining()
+    else
+        for _,row in ipairs(l.rows) do
+            if hit(row.upgrade) then
+                local saved,message=P.Development.upgrade(state.career,row.upgrade.id)
+                state.developmentMessage=message
+                if saved then
+                    for _,play in ipairs({state.careerPlay or false,state.training or false}) do
+                        if play then
+                            local player=play.game.squad[play.game.careerPlayer or 1]
+                            player.attributes=P.Attributes.restore(state.career.attributes,state.career.position)
+                        end
+                    end
+                end
+                return
+            end
+        end
+    end
+end
+
 local function careerTouch(touch)
     if touch.state ~= BEGAN then return end
     local career, hud = state.career, careerLayout()
@@ -216,6 +297,7 @@ local function careerTouch(touch)
     elseif hit(hud.name) then openCreator(true,1)
     elseif hit(hud.position) then openCreator(true,2)
     elseif hit(hud.team) then openCreator(true,5)
+    elseif hit(hud.development) then openDevelopment()
     elseif hit(hud.nextSkill) then
         state.careerSkill = (state.careerSkill or 1) % P.CareerSeason.trainingCount(career) + 1
     elseif hit(hud.train) and hud.train.enabled and not state.careerPlay then
@@ -233,6 +315,7 @@ end
 
 local function activePlay(page)
     page = page or state.page
+    if page == "TRAINING" then return state.training,P.Gameplay end
     if page == "MATCH" then return state.match, P.FullMatch end
     if page == "CAREER_GAME" then return state.careerPlay, P.FullMatch end
     return state.practice, P.Gameplay
@@ -259,7 +342,7 @@ local function menuTouch(touch)
             elseif id=="RESUME" and state.resumePage then navigate(state.resumePage)
             elseif id=="RESET" and state.resumePage then
                 local play,controller=activePlay(state.resumePage)
-                if play and not play.recorded then controller.command(play.game,"reset") end
+                if play and not play.recorded then resetPlaySession(play,controller,state.resumePage) end
                 navigate(state.resumePage)
             end
             return
@@ -366,6 +449,11 @@ function draw()
         P.Style.screen(state.page,menuLayout(),state.pageAge)
         return
     end
+    if state.page=="DEVELOPMENT" then
+        local l=P.Development.layout(state.career,state.developmentPage)
+        P.Development.draw(state.career,l,state.developmentMessage)
+        return
+    end
     if state.page == "CAREER" then
         P.CareerUI.draw(state.career, careerLayout(), state.careerPlay,
             state.careerName ~= nil, state.careerName, state.careerMessage)
@@ -399,7 +487,8 @@ function draw()
         if state.page == "CAREER_GAME" and not play.saveAttempted then
             saveCareerResult(play)
         end
-        if state.page ~= "PRACTICE" then
+        if controller==P.Gameplay then updateTrainingReward(play,state.page) end
+        if controller==P.FullMatch then
             P.CameraController.match(play.camera, play.game, dt, state.aim and state.aim.shown, hud.frame)
         else
             P.CameraController.practice(play.camera, play.game, dt, state.aim and state.aim.shown, hud.frame)
@@ -597,14 +686,15 @@ local function playTouch(touch, hud)
         end
         if P.UI.hit(hud.edit, touch.x, touch.y) then
             if state.pick then controller.command(game,"releasepick",0,0) end
-            if state.page == "CAREER_GAME" then openCareer() else openCreator() end
+            if state.page=="TRAINING" then openDevelopment()
+            elseif state.page=="CAREER_GAME" then openCareer() else openCreator() end
             return
         end
         if P.UI.hit(hud.reset, touch.x, touch.y) then
             if state.page == "CAREER_GAME" and play.recorded then return end
             P.UI.press(hud, hud.reset, touch.id)
             clearPlayInput()
-            controller.command(game, "reset")
+            resetPlaySession(play,controller,state.page)
             return
         end
         if P.UI.hit(hud.camera, touch.x, touch.y) then
@@ -676,6 +766,8 @@ function touched(touch)
         creatorTouch(touch, currentHUDLayout())
     elseif state.page == "CAREER" then
         careerTouch(touch)
+    elseif state.page=="DEVELOPMENT" then
+        developmentTouch(touch)
     else
         playTouch(touch, currentHUDLayout())
     end
@@ -704,7 +796,7 @@ function setup()
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens", "Style", "Athlete"
+            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

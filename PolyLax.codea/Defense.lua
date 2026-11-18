@@ -45,10 +45,7 @@ function Defense.attributes(role)
 end
 
 local function stat(player, key, fallback)
-    local attributes = player.attributes
-    local value = attributes and tonumber(attributes[key]) or fallback
-    if value > 1 then value = value / 100 end
-    return clamp(value, .05, 1)
+    return clamp(P.Attributes.unit(player,key,fallback),.05,1)
 end
 
 local function frame(time, grip, shaft, torso, crouch, roll, freeHand)
@@ -162,18 +159,21 @@ function Defense.contact(match, checker, request)
     if not body and victimFacing < -.70 then return "miss" end
 
     local gap = body and length or stickGap(checker, target)
-    local security = stat(target, "ballSecurity", .65)
+    local security = stat(target, "ballControl", .65)
     local protect = target.anim.action == "protect" or target.anim.action == "dodge"
     local ready = target.anim.action ~= "pass" and target.anim.action ~= "shoot"
     local impact = request.skill + (body and .21 or .05) + .22 * facing
         + .12 * math.max(0, victimFacing) - .13 * length / reach
+    local leverage = body and (stat(checker,"strength",.60)-stat(target,"strength",.60)) or 0
+    impact = impact+leverage*.18
     if not body then impact = impact - .20 * gap end
     local stability = security * .63 + (protect and .30 or 0) + (ready and .13 or 0)
     if impact < stability then return "miss" end
 
     local range = math.max(.28, length)
-    local velocity = vec3(target.vx*.23 + dx*check.force/range,
-        body and .78 or .48, target.vz*.23 + dz*check.force/range)
+    local force = check.force*(1+leverage*.28)
+    local velocity = vec3(target.vx*.23 + dx*force/range,
+        body and .78 or .48, target.vz*.23 + dz*force/range)
     return "loose", target.rig.pocket.worldPosition, velocity
 end
 

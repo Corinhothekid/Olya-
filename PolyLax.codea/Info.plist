@@ -12,6 +12,7 @@
 		<string>AnimationController</string>
 		<string>CameraController</string>
 		<string>GoalPhysics</string>
+		<string>Attributes</string>
 		<string>Passing</string>
 		<string>Tactics</string>
 		<string>Screens</string>
@@ -25,6 +26,7 @@
 		<string>UI</string>
 		<string>Athlete</string>
 		<string>Career</string>
+		<string>Development</string>
 		<string>CareerUI</string>
 		<string>CareerSeason</string>
 	</array>

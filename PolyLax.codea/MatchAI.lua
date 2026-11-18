@@ -111,7 +111,8 @@ local function moveKeeper(match, keeper, intent, ball, sightTime)
     local depth = (ball.z - goal.z) * inside
     local lateral = ball.x - cx
     local angle = atan2(lateral, math.max(2.5, depth))
-    local arc = 1.08 + ((keeper.positioning or .78) - .5) * .34
+    local positioning = P.Attributes.unit(keeper,"goaliePositioning",keeper.positioning or .78)
+    local arc = 1.08+(positioning-.5)*.34
     local px = cx + math.sin(angle) * arc
     local pz = goal.z + math.cos(angle) * arc * inside
     if depth < .4 then
@@ -125,7 +126,8 @@ local function moveKeeper(match, keeper, intent, ball, sightTime)
     move(intent, px, pz)
     intent.lookX, intent.lookZ = ball.x, ball.z
     intent.role = sightTime and "SHOT" or "GOAL ARC"
-    intent.speed = 2.7 + (keeper.footwork or .73) * (sightTime and 4.1 or 2.5)
+    local footwork = P.Attributes.unit(keeper,"goaliePositioning",keeper.footwork or .73)
+    intent.speed = 2.7+footwork*(sightTime and 4.1 or 2.5)
 end
 
 local function teamSlot(player)
@@ -291,11 +293,13 @@ local function offBallAttack(match, ai, snapshot, team)
     local keeper = match.squad[match.keepers[3 - team]]
     local shotSide = keeper.x >= cx and -1 or 1
     local shootingAngle = distance / math.max(1, shotRange)
-    if shotRange < 15 and distance > 2.6 and shootingAngle > .49
+    local read = P.Attributes.unit(carrier,"lacrosseIQ",.60)-.60
+    local decisionDelay = 1-read*.42
+    if shotRange < 15 and distance > 2.6 and shootingAngle > .49+read*.11
             and (pressure > 2.15 or shotRange < 7.4) then
         intent.action = "shoot"
         intent.aim = vec3(cx + goal.halfWidth*.66*shotSide, goalHeight(goal)*.66, goal.z)
-        tactic.nextAction = now + .72
+        tactic.nextAction = now+.72*decisionDelay
     elseif defender and pressure < 2.6 and distance < 23 then
         local side = defender.x <= carrier.x and 1 or -1
         local nextX = carrier.x + side * 3.1
@@ -304,7 +308,7 @@ local function offBallAttack(match, ai, snapshot, team)
                 and now >= (tactic.nextDodge or 0) then
             move(intent, nextX, nextZ)
             intent.action, intent.moveX, intent.moveZ = "dodge", side*.79, -approachZ*.61
-            tactic.nextDodge, tactic.nextAction = now + 1.4, now + .38
+            tactic.nextDodge, tactic.nextAction = now+1.4,now+.38*decisionDelay
         end
     end
     if not intent.action and (pressure < 3.8 or distance < 25 or match.mode == "SWING") then
@@ -313,10 +317,10 @@ local function offBallAttack(match, ai, snapshot, team)
         if not target and match.mode ~= "CLEAR" then
             target, score = AI.passTarget(match, carrierID, false)
         end
-        if target and score > 2.5 then
+        if target and score > 2.5+read*.58 then
             intent.action, intent.target = "pass", target
             intent.tactic = detail
-            tactic.nextAction = now + .68
+            tactic.nextAction = now+.68*decisionDelay
         end
     end
 end
@@ -651,8 +655,8 @@ local function watchShot(match, ai)
     if travelTime < -.08 or travelTime > 1.8 then return end
     local memory = ai.goalies[keeperID]
     if not memory or memory.flight ~= flight then
-        local reflexes = keeper.reflexes or .76
-        local anticipation = keeper.anticipation or .72
+        local reflexes = P.Attributes.unit(keeper,"reflexes",keeper.reflexes or .76)
+        local anticipation = P.Attributes.unit(keeper,"goaliePositioning",keeper.anticipation or .72)
         local distance = math.abs(goal.z-ball.z)
         local delay = clamp(.29 - reflexes*.18 - anticipation*.025 + distance*.002, .085, .31)
         memory = {flight=flight, ready=ai.elapsed+delay}
@@ -692,8 +696,8 @@ end
 function AI.sweepKeeper(match, keeperID, from, to, velocity)
     local keeper = match.squad[keeperID]
     if not keeper then return nil end
-    local rate = keeper.positioning or .78
-    local hands = keeper.handSpeed or .75
+    local rate = P.Attributes.unit(keeper,"goaliePositioning",keeper.positioning or .78)
+    local hands = P.Attributes.unit(keeper,"handSpeed",keeper.handSpeed or .75)
     local memory = match.ai and match.ai.goalies[keeperID]
     local ready = memory and match.ai.elapsed >= memory.ready
     local best, caught, center = nil, false, nil
