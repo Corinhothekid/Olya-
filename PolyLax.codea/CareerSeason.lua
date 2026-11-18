@@ -1,4 +1,4 @@
--- PolyLax Build 012 | Playable season schedule, recruiting, and progression
+-- PolyLax Build 013 | Playable season schedule, recruiting, and progression
 PolyLax = PolyLax or {}
 local P = PolyLax
 local Season = {}
@@ -50,7 +50,7 @@ local function newSeason(career)
     end
     return {team=career.team, stage=career.stage, season=career.season, week=1, phase="regular",
         rounds=rounds, records=records, results={}, playoffs={}, personal={}, games=0, xp=0,
-        wins=0, losses=0, ties=0, replay=0}
+        screenCoachCounts={}, wins=0, losses=0, ties=0, replay=0}
 end
 
 local function state(career)
@@ -62,6 +62,8 @@ local function state(career)
         data = newSeason(career)
         career.seasonData = data
     end
+    if type(data.personal) ~= "table" then data.personal = {} end
+    if type(data.screenCoachCounts) ~= "table" then data.screenCoachCounts = {} end
     return data
 end
 
@@ -171,7 +173,7 @@ function Season.fixture(career)
     return game
 end
 
-function Season.record(career, fixture, match, experience, personal)
+function Season.record(career, fixture, match, experience, personal, screenEvents)
     local current = Season.fixture(career)
     if not current or current.id ~= fixture.id then return false end
     local data = copy(career.seasonData)
@@ -181,6 +183,12 @@ function Season.record(career, fixture, match, experience, personal)
     data.results[fixture.id] = own.."–"..other
     data.games, data.xp = data.games+1, data.xp+experience
     for key, value in pairs(personal) do data.personal[key] = (data.personal[key] or 0)+value end
+    screenEvents = screenEvents or {}
+    for _, event in ipairs(screenEvents) do
+        local kind = event.kind
+        data.screenCoachCounts[kind] = (data.screenCoachCounts[kind] or 0)+1
+    end
+    data.lastScreenCoach = {fixtureId=fixture.id, points=personal.screenCoachPoints or 0, count=#screenEvents}
     if own>other then data.wins=data.wins+1
     elseif own<other then data.losses=data.losses+1
     else data.ties=data.ties+1 end
@@ -195,7 +203,8 @@ function Season.record(career, fixture, match, experience, personal)
         return true
     end
     local semifinal = data.phase == "semifinal"
-    data.playoffs[semifinal and 1 or 2].result = data.results[fixture.id]
+    local game = data.playoffs[semifinal and 1 or 2]
+    game.result, game.fixtureId = data.results[fixture.id], fixture.id
     data.replay = 0
     if semifinal and own > other then
         data.phase = "final"
@@ -211,6 +220,11 @@ function Season.standings(career)
     return ranked(state(career))
 end
 
+local function gameScreenPoints(career, fixtureId)
+    local entry = fixtureId and career.entries[fixtureId]
+    return entry and entry.stats and entry.stats.screenCoachPoints
+end
+
 function Season.schedule(career)
     local current = Season.fixture(career)
     local data, rows = state(career), {}
@@ -218,14 +232,20 @@ function Season.schedule(career)
         local game = regularFixture(career,data,week)
         if game then
             rows[#rows+1] = {label=game.label,opponent=P.TeamUniform.get(game.opponent).name,
-                home=game.home,result=data.results[game.id],current=current and current.id==game.id}
+                home=game.home,result=data.results[game.id],current=current and current.id==game.id,
+                screenCoachPoints=gameScreenPoints(career, game.id)}
         end
     end
     for i, game in ipairs(data.playoffs) do
         rows[#rows+1] = {label=game.label,opponent=P.TeamUniform.get(game.opponent).name,home=game.home,
-            result=game.result,current=current and data.phase==(i==1 and "semifinal" or "final")}
+            result=game.result,current=current and data.phase==(i==1 and "semifinal" or "final"),
+            screenCoachPoints=gameScreenPoints(career, game.fixtureId)}
     end
     return rows
+end
+
+local function screenCoachAdjustment(data)
+    return math.max(-12, math.min(12, data.personal.screenCoachPoints or 0))
 end
 
 function Season.status(career)
@@ -233,12 +253,13 @@ function Season.status(career)
     local data = state(career)
     local contract = career.contract
     local completeSeason = data.phase == "complete"
-    local starter = data.games >= 2 and data.xp >= 56
+    local starter = data.games >= 2 and data.xp + screenCoachAdjustment(data) >= 56
     local status = completeSeason and "Season complete" or data.phase == "regular"
         and ("Week "..data.week.." of "..#data.rounds) or data.phase == "semifinal" and "Semifinal" or "Championship"
     if data.titleWon then status = "Championship won" end
     return {phase=data.phase,season=career.season,starter=starter,title=data.titleWon,
         statusLine=status,championships=career.championships or 0,
+        screenCoachPoints=data.personal.screenCoachPoints or 0, lastScreenCoach=data.lastScreenCoach,
         contract=contract and (contract.remaining.." season(s) left · "..contract.value.." credits"),
         canAdvance=completeSeason and contract and contract.remaining > 0}
 end
@@ -246,7 +267,7 @@ end
 function Season.offers(career)
     local data = state(career)
     if data.phase ~= "complete" then return {} end
-    local performance = data.xp + data.wins*5 + (data.titleWon and 30 or 0)
+    local performance = data.xp + data.wins*5 + (data.titleWon and 30 or 0) + screenCoachAdjustment(data)
     local list = {}
     if career.stage == "highSchool" then
         for i, team in ipairs(P.SchoolTeams.ncaa) do
@@ -276,7 +297,7 @@ local function nextSeason(career, candidate, stage, team)
     candidate.history = candidate.history or {}
     candidate.history[#candidate.history+1] = {season=candidate.season, stage=candidate.stage,
         team=candidate.team, wins=data.wins, losses=data.losses, ties=data.ties,
-        stats=data.personal, title=data.titleWon}
+        stats=data.personal, screenCoachCounts=data.screenCoachCounts, title=data.titleWon}
     candidate.stage, candidate.team = stage, team
     candidate.season, candidate.seasonData = candidate.season+1, nil
     return commit(career,candidate)
@@ -307,6 +328,14 @@ local skills = {
     {{"reflexes","Reflexes"},{"handSpeed","Hand speed"},{"clearingAccuracy","Clears"},{"reaction","Reactions"}}
 }
 
+for _, list in ipairs(skills) do
+    list[#list+1] = {"strength", "Strength"}
+end
+
+function Season.trainingCount(career)
+    return #(skills[career.position] or skills[2])
+end
+
 function Season.training(career, index)
     local list = skills[career.position] or skills[2]
     local item = list[((index or 1)-1)%#list+1]
@@ -317,7 +346,7 @@ function Season.training(career, index)
 end
 
 function Season.train(career, key)
-    for index=1,#skills[career.position] do
+    for index=1,Season.trainingCount(career) do
         local skill = Season.training(career,index)
         if skill.key==key and skill.available then
             local candidate = copy(career)

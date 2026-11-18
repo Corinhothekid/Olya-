@@ -178,6 +178,7 @@ function Defense.contact(match, checker, request)
 end
 
 function Defense.passPoint(match, flight, time)
+    if flight.point then return P.Passing.sample(match,flight,time) end
     local fraction = clamp(time / flight.duration, 0, 1)
     local endPoint = match.squad[flight.to].rig.pocket.worldPosition
     return flight.origin + (endPoint-flight.origin)*fraction

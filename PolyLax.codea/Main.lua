@@ -1,4 +1,4 @@
--- PolyLax Build 012 | Main
+-- PolyLax Build 013 | Main
 PolyLax = PolyLax or {}
 local P = PolyLax
 local state
@@ -32,6 +32,11 @@ local function applyCreatorProfile()
     P.Character.apply(state.creator.rig, state.profile, selected, uniform, personalColors)
 end
 
+local function clearPlayInput()
+    state.joystick, state.aim, state.passAim, state.sprint, state.pick = nil, nil, nil, nil, nil
+    state.moveX, state.moveZ = 0, 0
+end
+
 local function openCreator()
     if not state.creator then
         local scene = configuredScene()
@@ -44,8 +49,8 @@ local function openCreator()
         pedestal(scene, 2.8, .15, 2.8, -.075, color(29, 64, 113))
     end
     state.page = "CREATOR"
-    state.drag, state.joystick, state.aim, state.sprint = nil, nil, nil, nil
-    state.moveX, state.moveZ = 0, 0
+    state.drag = nil
+    clearPlayInput()
     state.yaw, state.targetYaw = 0, 0
     state.layout = nil
     applyCreatorProfile()
@@ -66,8 +71,8 @@ local function openPlay(page)
         }
     end
     state.page = page
-    state.drag, state.joystick, state.aim, state.sprint = nil, nil, nil, nil
-    state.moveX, state.moveZ = 0, 0
+    state.drag = nil
+    clearPlayInput()
     state.layout = nil
 end
 
@@ -81,8 +86,7 @@ end
 local function openCareer()
     state.page = "CAREER"
     state.careerView, state.careerPage = "profile", 1
-    state.joystick, state.aim, state.sprint = nil, nil, nil
-    state.moveX, state.moveZ = 0, 0
+    clearPlayInput()
     state.layout = nil
     if state.careerPlay and state.careerPlay.recorded then state.careerPlay = nil end
 end
@@ -169,7 +173,7 @@ local function careerTouch(touch)
     elseif hit(hud.team) and not state.careerPlay then
         P.Career.cycleSchool(career)
     elseif hit(hud.nextSkill) then
-        state.careerSkill = (state.careerSkill or 1) % 4 + 1
+        state.careerSkill = (state.careerSkill or 1) % P.CareerSeason.trainingCount(career) + 1
     elseif hit(hud.train) and hud.train.enabled and not state.careerPlay then
         if P.CareerSeason.train(career, hud.train.id) then state.careerMessage = "Attribute improved" end
     elseif hit(hud.advance) and not state.careerPlay then
@@ -224,6 +228,26 @@ local function aimGuide(play, controller, dt)
     local a = P.CameraController.project(play.camera, launch)
     local b = P.CameraController.project(play.camera, aim.shown)
     if a and b then return {from=a, target=b} end
+end
+
+local function passPlan(play, controller)
+    local aim = state.passAim
+    if aim and aim.owner ~= play.game.carrier then return end
+    local x, z = worldMoveX(play), -state.moveZ
+    if aim then x, z = aim.dx, aim.dz end
+    return controller.passPreview(play.game, x, z)
+end
+
+local function passGuide(play, controller, hud)
+    if state.aim then return end
+    local plan = passPlan(play,controller)
+    if not plan then return end
+    local mark = P.CameraController.project(play.camera, plan.point)
+    if not mark or mark.x < hud.leftX or mark.x > hud.rightX
+        or mark.y < hud.frame.bottom or mark.y > hud.frame.top then return end
+    local teammate = plan.to and play.game.squad[plan.to]
+    return {x=mark.x, y=mark.y, name=teammate and teammate.name or "OPEN SPACE",
+        manual=not teammate}
 end
 
 local function currentHUDLayout()
@@ -294,7 +318,7 @@ function draw()
                 hud.frame, hud.leftX, hud.rightX)
         end
         P.UI.practice(hud, play.game, state.moveX, state.moveZ,
-            aimGuide(play, controller, dt), mode, ballEdge)
+            aimGuide(play, controller, dt), mode, ballEdge, passGuide(play,controller,hud))
     end
 end
 
@@ -398,6 +422,26 @@ local function playTouch(touch, hud)
     if finished then
         P.UI.release(hud, touch.id)
         if state.sprint == touch.id then state.sprint = nil end
+        if state.pick == touch.id then
+            state.pick = nil
+            controller.command(game,"releasepick",worldMoveX(play),state.moveZ)
+            return
+        end
+    end
+    local passing = state.passAim
+    if passing and touch.id == passing.id then
+        if touch.state == MOVING or touch.state == ENDED then
+            local dx, dy = touch.x-passing.x, touch.y-passing.y
+            if dx*dx+dy*dy >= 36 then
+                passing.dx, passing.dz = dx*(play.horizontal or -1)/44, -dy/44
+            end
+        end
+        if finished then
+            local plan = touch.state == ENDED and passPlan(play,controller)
+            state.passAim = nil
+            if plan then controller.command(game,"pass",worldMoveX(play),state.moveZ,plan) end
+        end
+        return
     end
     local aim = state.aim
     if aim and touch.id == aim.id then
@@ -422,13 +466,14 @@ local function playTouch(touch, hud)
 
     if touch.state == BEGAN then
         if P.UI.hit(hud.edit, touch.x, touch.y) then
+            if state.pick then controller.command(game,"releasepick",0,0) end
             if state.page == "CAREER_GAME" then openCareer() else openCreator() end
             return
         end
         if P.UI.hit(hud.reset, touch.x, touch.y) then
             if state.page == "CAREER_GAME" and play.recorded then return end
             P.UI.press(hud, hud.reset, touch.id)
-            state.aim, state.sprint = nil, nil
+            clearPlayInput()
             controller.command(game, "reset")
             return
         end
@@ -444,10 +489,11 @@ local function playTouch(touch, hud)
                 return
             end
         end
-        if not state.sprint and P.UI.hit(hud.sprint, touch.x, touch.y)
-            and P.UI.action(game, hud.sprint) == "sprint" then
-            state.sprint = touch.id
-            P.UI.press(hud, hud.sprint, touch.id)
+        if hud.sprint and P.UI.hit(hud.sprint,touch.x,touch.y) then
+            if not state.sprint and P.UI.action(game,hud.sprint) == "sprint" then
+                state.sprint = touch.id
+                P.UI.press(hud,hud.sprint,touch.id)
+            end
             return
         end
         for _, item in ipairs(hud.commands) do
@@ -455,15 +501,27 @@ local function playTouch(touch, hud)
             if action and P.UI.hit(item, touch.x, touch.y) then
                 P.UI.press(hud, item, touch.id)
                 if action == "shoot" then
-                    if not state.aim then beginAim(touch, play, controller) end
+                    if not state.aim and not state.passAim then beginAim(touch, play, controller) end
+                elseif action == "pass" then
+                    if state.passAim or state.aim then return end
+                    local dx, dz = worldMoveX(play), -state.moveZ
+                    if controller.passPreview(game,dx,dz) then
+                        state.passAim = {id=touch.id,x=touch.x,y=touch.y,owner=game.carrier,dx=dx,dz=dz}
+                    else
+                        controller.command(game,"pass",dx,state.moveZ)
+                    end
+                elseif action == "setpick" then
+                    if not state.pick and controller.command(game,action,worldMoveX(play),state.moveZ) then
+                        state.pick = touch.id
+                    end
                 else
                     controller.command(game, action, worldMoveX(play), state.moveZ)
                 end
                 return
             end
         end
-        if not state.joystick and touch.x < hud.joyMaxX
-            and touch.y < hud.panelHeight then
+        if not state.joystick and touch.x >= hud.leftX and touch.x < hud.joyMaxX
+            and touch.y >= hud.joyMinY and touch.y < hud.panelHeight then
             state.joystick = {id=touch.id, x=touch.x, y=touch.y, radius=hud.joyRadius}
         end
     elseif state.joystick and touch.id == state.joystick.id then
@@ -506,13 +564,14 @@ function setup()
     startupError = nil
     runChecked("PolyLax could not start", function()
         assert(type(runSetup) == "function" and type(runFrame) == "function",
-            "Install the complete Build 012 Main tab.")
+            "Install the complete Build 013 Main tab.")
         local modules = PolyLax or {}
         local missing = {}
         for _, name in ipairs({
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
-            "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason"
+            "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
+            "Passing", "Tactics", "Screens"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

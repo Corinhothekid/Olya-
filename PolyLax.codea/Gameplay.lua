@@ -12,7 +12,8 @@ local formations = {
     {x = 0, z = -16, name = "X"}
 }
 
-local swingNext = {2, 5, 1, 3, 6, 4}
+local calls = {clear="CLEAR", swing="SWING", passdown="PASS DOWN"}
+local passFlight = {speed=18,minDuration=.34,maxDuration=1.10,arcRate=.073,maxArc=.75}
 local goalZ, goalieZ = -13, -12.3
 local ballRadius, goalHalfWidth, goalTop = .09, .995, 1.745
 local minX, maxX, minZ, maxZ = -8.4, 8.4, -16.5, 15.5
@@ -102,6 +103,8 @@ local function resetPlay(game)
     game.mode, game.clearTime = "SET", 0
     game.pending, game.flight, game.loose = nil, nil, nil
     game.scoopPlayer, game.goalDelay, game.inNet = nil, nil, nil
+    game.tactical, game.passSerial = nil, 0
+    P.Screens.reset(game)
     P.GoalPhysics.reset(game.goalPhysics)
     for i, player in ipairs(game.squad) do
         local anchor = formations[i]
@@ -143,7 +146,7 @@ function Gameplay.new(scene, profile, uniform, opponentId)
     uniform = uniform or P.TeamUniform.fromProfile(profile)
     local ball, marker = makeField(scene)
     local game = {
-        squad = {}, ball = ball, marker = marker, goal = vec3(0, .9, goalZ),
+        squad = {}, teams = {{1, 2, 3, 4, 5, 6}}, ball = ball, marker = marker, goal = vec3(0, .9, goalZ),
         goalPhysics = P.GoalPhysics.new(scene, {
             z=goalZ, attackSign=-1, halfWidth=goalHalfWidth, top=goalTop, radius=ballRadius
         }),
@@ -151,6 +154,7 @@ function Gameplay.new(scene, profile, uniform, opponentId)
         announcement = "", announcementTime = 0, moveX = 0, moveZ = 0,
         uniform = uniform, goalieRole = "opponent", opponentId = opponentId or profile and profile.OPPONENT
     }
+    P.Screens.registerAnimations()
 
     for i, anchor in ipairs(formations) do
         local rig = Character.new(scene)
@@ -158,7 +162,10 @@ function Gameplay.new(scene, profile, uniform, opponentId)
             FACE = (i - 1) % 4 + 1, HAIR = 2, BEARD = 1, BODY = 2, HELMET = 4,
             JERSEY = 2, GLOVES = 1, SHORTS = 4, CLEATS = 1, STICK = 4, NUMBER = i + 8
         }, nil, uniform, false)
-        game.squad[i] = {rig = rig, anim = Animation.new(rig), name = anchor.name}
+        game.squad[i] = {
+            id=i, team=1, role=i <= 3 and "M" or "A", slot=i,
+            homeX=anchor.x, homeZ=anchor.z, rig=rig, anim=Animation.new(rig), name=anchor.name
+        }
     end
 
     game.goalie = Character.new(scene)
@@ -172,26 +179,65 @@ function Gameplay.new(scene, profile, uniform, opponentId)
     return game
 end
 
-local function nearestTeammate(game, from)
-    local best, distance = nil, math.huge
-    local passer = game.squad[from]
-    for i, player in ipairs(game.squad) do
-        if i ~= from then
-            local d = length(player.x - passer.x, player.z - passer.z)
-            if d < distance then
-                distance, best = d, i
-            end
-        end
+local function startPass(game, plan, mode)
+    local from = game.carrier
+    if not from or not plan or not (plan.to or plan.point) or (plan.from and plan.from ~= from)
+        or (plan.to and not game.squad[plan.to])
+        or from == plan.to or game.pending or game.flight then return end
+    if P.AnimationController.play(game.squad[from].anim, "pass") then
+        game.pending = {kind="pass", from=from, to=plan.to, point=plan.point, call=mode}
+        game.mode = mode
+        game.clearTime = mode == "SET" and 0 or 3.5
+        return true
     end
-    return best
 end
 
-local function startPass(game, to, mode)
+function Gameplay.passPreview(game, dx, dz)
     local from = game.carrier
-    if not from or from == to or game.pending or game.flight then return end
-    if P.AnimationController.play(game.squad[from].anim, "pass") then
-        game.pending = {kind = "pass", from = from, to = to}
-        game.mode, game.clearTime = mode, 0
+    if game.clock <= 0 or game.goalDelay or not from or game.pending or game.flight
+        or game.squad[from].anim.action then return end
+    if from ~= game.controlled and length(dx or 0, dz or 0) < .12 then
+        local plan = P.Passing.forTarget(game, game.controlled)
+        plan.from = from
+        return plan
+    end
+    return P.Passing.select(game, from, dx, dz)
+end
+
+local function tacticalPass(game, call)
+    local from = game.carrier
+    if not from or game.pending or game.flight then return end
+    local to, detail = P.Tactics.choose(game, from, call)
+    if not to then
+        announce(game, "NO OPEN " .. (call == "PASS DOWN" and "DOWNFIELD" or call) .. " LANE")
+        return
+    end
+    if startPass(game, P.Passing.forTarget(game, to), call) then
+        P.Tactics.activate(game, detail, call, 1)
+        return true
+    end
+end
+
+local function playPick(game, manual)
+    local holder = game.carrier
+    if not holder or game.pending or game.flight or game.screen
+        or (manual and game.controlled == holder) then return end
+    local screener, detail
+    if manual then
+        screener = game.controlled
+        local actor = game.squad[screener]
+        detail = {x=actor.x, z=actor.z, manual=true}
+    else
+        detail = P.Tactics.pick(game, holder)
+        if not detail then
+            announce(game, "NO PICK AVAILABLE")
+            return
+        end
+        screener = detail.screener
+    end
+    if P.Screens.request(game, screener, holder, nil, detail) then
+        game.mode, game.clearTime = "PICK DOWN", 3.5
+        return true
     end
 end
 
@@ -243,16 +289,20 @@ function Gameplay.command(game, command, moveX, moveZ, aim)
 
     if command == "switch" then
         game.controlled = game.controlled % #game.squad + 1
-    elseif command == "clear" then
-        game.mode, game.clearTime = "CLEAR", 3.5
-    elseif command == "swing" then
-        if game.carrier then startPass(game, swingNext[game.carrier], "SWING") end
-    elseif command == "pass" then
-        if game.carrier then
-            local receiver = game.controlled ~= game.carrier
-                and game.controlled or nearestTeammate(game, game.carrier)
-            startPass(game, receiver, "SET")
+    elseif calls[command] then
+        return tacticalPass(game, calls[command])
+    elseif command == "pickdown" then
+        return playPick(game, false)
+    elseif command == "setpick" then
+        return playPick(game, true)
+    elseif command == "releasepick" then
+        local screen = game.screen
+        if screen and screen.manual then
+            return P.Screens.endHold(game,screen.screener,moveX or game.moveX,-(moveZ or game.moveZ))
         end
+    elseif command == "pass" then
+        return startPass(game, aim or Gameplay.passPreview(game,
+            moveX or game.moveX, -(moveZ or game.moveZ)), "SET")
     elseif command == "shoot" then
         if game.loose then
             announce(game, "RECOVER THE BALL")
@@ -298,10 +348,7 @@ end
 local function offBallTarget(game, index, carrierX, carrierZ)
     local anchor = formations[index]
     local x, z = anchor.x, anchor.z
-    if game.mode == "CLEAR" then
-        if index == 3 then x = carrierX <= 0 and 3.5 or -3.5 end
-        if index == 4 or index == 5 then z = -12 end
-    elseif index ~= 6 then
+    if index ~= 6 then
         x = x + carrierX * .16
         z = z + clamp((carrierZ + 5) * .20, -1.6, 1.6)
         -- One off-ball player fills the middle at a time.
@@ -333,14 +380,22 @@ local function movePlayers(game, dt)
     local carrierX, carrierZ = holder and holder.x or 0, holder and holder.z or -5
     local chase = nearestLoosePlayer(game)
     local ball = game.ball.position
+    local cut = P.Tactics.activeCut(game)
+    local manual = length(game.moveX, game.moveZ) > .08
 
     for index, player in ipairs(game.squad) do
         local vx, vz = 0, 0
-        if index == game.controlled then
+        local screen = game.screen and P.Screens.intent(game, index)
+        local receiveX, receiveZ = P.Passing.receiveTarget(game, index)
+        local cutting = cut and cut.cutID == index
+        local screenControl = screen and screen.screenControl
+        player.screenIntent = screen
+        if index == game.controlled and not screenControl and (manual or not (cutting or receiveX)) then
             local speed = game.sprinting and 8.3 or 6.1
             vx, vz = game.moveX * speed, -game.moveZ * speed
-        elseif index ~= game.carrier then
+        elseif index ~= game.carrier or screenControl then
             local tx, tz = offBallTarget(game, index, carrierX, carrierZ)
+            local limit = 4.4
             if index == chase then
                 local dx, dz = player.x - ball.x, player.z - ball.z
                 local distance = length(dx, dz)
@@ -349,11 +404,18 @@ local function movePlayers(game, dt)
                     dx, dz, distance = math.sin(yaw), math.cos(yaw), 1
                 end
                 tx, tz = ball.x + dx * .65 / distance, ball.z + dz * .65 / distance
+                limit = 5.3
+            elseif receiveX then
+                tx, tz, limit = receiveX, receiveZ, 5.8
+            elseif cutting then
+                tx, tz, limit = cut.cutX, cut.cutZ, 5.6
+            elseif screenControl then
+                tx, tz, limit = screen.x, screen.z, screen.speed
             end
             local dx, dz = tx - player.x, tz - player.z
             local distance = length(dx, dz)
             if distance > .08 then
-                local speed = math.min(distance * 3, index == chase and 5.3 or 4.4)
+                local speed = math.min(distance * 3, limit)
                 vx, vz = dx * speed / distance, dz * speed / distance
             end
         end
@@ -379,11 +441,13 @@ local function movePlayers(game, dt)
         local lookX, lookZ = player.vx, player.vz
         local pending, flight = game.pending, game.flight
         if pending and pending.from == index then
-            local target = pending.to and game.squad[pending.to]
-            lookX, lookZ = (target and target.x or pending.target and pending.target.x or 0) - player.x,
-                (target and target.z or goalZ) - player.z
-        elseif game.scoopPlayer == index
-            or flight and flight.to == index and flight.duration - flight.time < .30 then
+            local target = pending.to and game.squad[pending.to] or pending.point or pending.target or game.goal
+            lookX, lookZ = target.x-player.x, target.z-player.z
+        elseif player.screenIntent and player.screenIntent.lookX then
+            lookX, lookZ = player.screenIntent.lookX-player.x, player.screenIntent.lookZ-player.z
+        elseif flight and flight.to == index and flight.duration - flight.time < .43 then
+            lookX, lookZ = flight.origin.x-player.x, flight.origin.z-player.z
+        elseif game.scoopPlayer == index then
             lookX, lookZ = ball.x - player.x, ball.z - player.z
         elseif player.speed < .25 then
             lookX, lookZ = (holder and holder ~= player and carrierX or 0) - player.x,
@@ -434,18 +498,14 @@ local function beginGoal(game, contact)
 end
 
 local function release(game, pending)
-    local from = game.squad[pending.from]
-    local launch = pocket(from)
-    local flight = {kind = pending.kind, from = pending.from, origin = launch, time = 0}
-
+    local flight
     if pending.kind == "pass" then
-        local receiver = game.squad[pending.to]
-        local distance = length(receiver.x - from.x, receiver.z - from.z)
-        flight.to = pending.to
-        flight.duration = clamp(distance / 18, .34, 1.10)
-        flight.arc = clamp(distance * .073, .18, .75)
+        flight = P.Passing.launch(game, pending, passFlight)
         game.passes = game.passes + 1
     else
+        local from = game.squad[pending.from]
+        local launch = pocket(from)
+        flight = {kind="shot", from=pending.from, origin=launch, time=0}
         local aim = (pending.aim + game.moveX) * .5
         local goal = game.goalPhysics
         local targetX = game.goalieX <= goal.x and goal.x+.69 or goal.x-.69
@@ -464,19 +524,7 @@ local function release(game, pending)
     end
 
     game.pending, game.carrier, game.flight = nil, nil, flight
-    game.ball.position = launch
-end
-
-local function planCatch(game, dt)
-    local flight = game.flight
-    if not flight or not flight.to or flight.catchStarted then return end
-
-    local catchTime = P.AnimationController.clips.catch.eventTime
-    local remaining = flight.duration - flight.time
-    if remaining <= catchTime + dt then
-        local speedScale = catchTime / math.max(dt, remaining)
-        flight.catchStarted = P.AnimationController.play(game.squad[flight.to].anim, "catch", speedScale)
-    end
+    game.ball.position = flight.origin
 end
 
 local function planScoop(game)
@@ -555,18 +603,15 @@ local function updateFlight(game, dt, catchIndex)
         return
     end
     flight.time = math.min(flight.time + dt, flight.duration)
-    local progress = flight.time / flight.duration
-    local target = pocket(game.squad[flight.to])
-    game.ball.position = flight.origin + (target - flight.origin) * progress
-        + vec3(0, math.sin(progress * math.pi) * flight.arc, 0)
-    if catchIndex == flight.to then
+    game.ball.position = P.Passing.sample(game, flight, flight.time)
+    if P.Passing.canCatch(game, flight, catchIndex, game.ball.position) then
         local autoSelect = game.controlled == flight.from
         local controlled = game.controlled
         attach(game, flight.to)
         if not autoSelect then game.controlled = controlled end
-    elseif progress >= 1 then
-        makeLoose(game, game.ball.position, vec3(0, -.6, 0))
-        announce(game, "PASS DROPPED")
+    elseif flight.time >= flight.duration then
+        makeLoose(game, game.ball.position, P.Passing.endVelocity(game, flight))
+        announce(game, flight.to and "PASS DROPPED" or "BALL TO SPACE")
     end
 end
 
@@ -639,11 +684,11 @@ function Gameplay.update(game, dt, moveX, moveZ)
 
     if game.clearTime > 0 then
         game.clearTime = math.max(0, game.clearTime - dt)
-        if game.clearTime == 0 and game.mode == "CLEAR" then game.mode = "SET" end
+        if game.clearTime == 0 then game.mode = "SET" end
     end
 
     movePlayers(game, dt)
-    planCatch(game, dt)
+    P.Passing.scheduleCatch(game, game.flight, dt)
     planScoop(game)
 
     local flight, loose = game.flight, game.loose
@@ -651,7 +696,8 @@ function Gameplay.update(game, dt, moveX, moveZ)
     for index, player in ipairs(game.squad) do
         local event = P.AnimationController.update(player.anim, dt, {
             speed = player.speed, possessed = game.carrier == index, turn = player.turn,
-            scoopPoint = game.scoopPlayer == index and game.ball.position or nil
+            scoopPoint = game.scoopPlayer == index and game.ball.position or nil,
+            catchPoint = P.Passing.catchPoint(game, index)
         })
         if event == "release" and game.pending and game.pending.from == index then
             release(game, game.pending)
@@ -673,6 +719,7 @@ function Gameplay.update(game, dt, moveX, moveZ)
         game.ball.position = pocket(game.squad[game.carrier])
     end
 
+    P.Screens.update(game, dt)
     game.marker.position = game.squad[game.controlled].rig.root.position
     if game.clock == 0 and not game.inNet then announce(game, "PRACTICE COMPLETE", 2) end
 end

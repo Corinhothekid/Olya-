@@ -1,4 +1,4 @@
--- PolyLax Build 012 | Road to the Pros player profile and match handoff
+-- PolyLax Build 013 | Road to the Pros player profile and match handoff
 PolyLax = PolyLax or {}
 local P = PolyLax
 local Career = {}
@@ -6,21 +6,22 @@ P.Career = Career
 
 local saveKey = "PolyLax.Career.1"
 local statKeys = {"goals", "assists", "saves", "groundBalls", "faceoffs",
-    "causedTurnovers", "interceptions", "shots", "completions", "turnovers", "fouls"}
+    "causedTurnovers", "interceptions", "shots", "completions", "turnovers", "fouls",
+    "screens", "screenAssists", "screenOpenShots", "illegalScreens"}
 Career.statKeys = statKeys
 
 Career.positions = {
-    {label="Attack", slot=1, attributes={shooting=68, ballSecurity=67, speed=69}},
-    {label="Midfield", slot=5, attributes={speed=72, stamina=71, passing=65}},
-    {label="Defense", slot=7, attributes={stickCheck=72, bodyCheck=70, interception=70}},
-    {label="Faceoff", slot=4, attributes={faceoff=76, reaction=69, stamina=70}},
-    {label="Goalie", slot=10, attributes={reflexes=75, handSpeed=74, clearingAccuracy=68}}
+    {label="Attack", slot=1, attributes={shooting=68, ballSecurity=67, speed=69, strength=64}},
+    {label="Midfield", slot=5, attributes={speed=72, stamina=71, passing=65, strength=66}},
+    {label="Defense", slot=7, attributes={stickCheck=72, bodyCheck=70, interception=70, strength=73}},
+    {label="Faceoff", slot=4, attributes={faceoff=76, reaction=69, stamina=70, strength=70}},
+    {label="Goalie", slot=10, attributes={reflexes=75, handSpeed=74, clearingAccuracy=68, strength=62}}
 }
 
 local baseAttributes = {
     shooting=57, ballSecurity=58, speed=61, passing=58, stamina=60, faceoff=51,
     reaction=58, bodyCheck=56, stickCheck=56, interception=56,
-    reflexes=55, handSpeed=54, clearingAccuracy=57
+    reflexes=55, handSpeed=54, clearingAccuracy=57, strength=60
 }
 
 Career.stages = {highSchool="HIGH SCHOOL", college="COLLEGE", professional="PROFESSIONAL"}
@@ -49,9 +50,16 @@ local function bounded(value, min, max)
     return math.max(min, math.min(max, math.floor(tonumber(value) or min)))
 end
 
+local function careerStats(stats)
+    if type(stats) ~= "table" then stats = {} end
+    for _, key in ipairs(statKeys) do stats[key] = bounded(stats[key], 0, 1000000) end
+    stats.screenCoachPoints = bounded(tonumber(stats.screenCoachPoints) or 0, -1000000, 1000000)
+    return stats
+end
+
 function Career.new()
     return {version=1, name="New Player", position=2, stage="highSchool", team="briarbank",
-        season=1, games=0, wins=0, losses=0, ties=0, xp=0, stats={}, entries={},
+        season=1, games=0, wins=0, losses=0, ties=0, xp=0, stats=careerStats(), entries={},
         attributes=defaults(2)}
 end
 
@@ -97,7 +105,7 @@ function Career.load()
         end
     end
     saved.attributes = attributes
-    saved.stats = type(saved.stats) == "table" and saved.stats or {}
+    saved.stats = careerStats(saved.stats)
     saved.entries = type(saved.entries) == "table" and saved.entries or {}
     return saved
 end
@@ -154,6 +162,23 @@ function Career.matchOptions(career, fixture)
         playerAttributes=copy(career.attributes)}
 end
 
+local function screenEvaluation(events)
+    local result, points = {}, 0
+    for _, item in ipairs(type(events) == "table" and events or {}) do
+        if type(item) == "table" and type(item.kind) == "string" and item.kind ~= ""
+            and type(item.points) == "number" and item.points % 1 == 0 then
+            local eventPoints = bounded(item.points, -100, 100)
+            local event = {kind=item.kind:sub(1, 40), points=eventPoints}
+            if type(item.time) == "number" and item.time >= 0 and item.time < math.huge then
+                event.time = item.time
+            end
+            result[#result+1] = event
+            points = points + eventPoints
+        end
+    end
+    return result, points
+end
+
 function Career.record(career, fixture, match)
     if not fixture or not match or match.phase ~= "FINAL" then return false end
     if career.entries[fixture.id] then return false end
@@ -169,6 +194,9 @@ function Career.record(career, fixture, match)
         personal[key] = value
         nextSave.stats[key] = (career.stats[key] or 0) + value
     end
+    local screenEvents, coachPoints = screenEvaluation(player.screenCoachEvents)
+    personal.screenCoachPoints = coachPoints
+    nextSave.stats.screenCoachPoints = (career.stats.screenCoachPoints or 0) + coachPoints
     local win = match.homeScore > match.awayScore
     local tie = match.homeScore == match.awayScore
     nextSave.games = nextSave.games + 1
@@ -179,11 +207,11 @@ function Career.record(career, fixture, match)
         + personal.assists * 5 + personal.saves * 3 + personal.faceoffs * 4
         + personal.groundBalls * 2 + personal.causedTurnovers * 4 + personal.interceptions * 3
     nextSave.xp = nextSave.xp + earned
-    if not P.CareerSeason.record(nextSave, fixture, match, earned, personal) then
+    if not P.CareerSeason.record(nextSave, fixture, match, earned, personal, screenEvents) then
         return false, "This result does not match the scheduled game"
     end
     nextSave.entries[fixture.id] = {home=match.homeScore, away=match.awayScore,
-        opponent=fixture.opponent, stats=personal}
+        opponent=fixture.opponent, stats=personal, screenCoachEvents=screenEvents}
     if not Career.save(nextSave) then return false, "Save unavailable" end
     for key, value in pairs(nextSave) do career[key] = value end
     return true

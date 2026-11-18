@@ -12,6 +12,9 @@
 		<string>AnimationController</string>
 		<string>CameraController</string>
 		<string>GoalPhysics</string>
+		<string>Passing</string>
+		<string>Tactics</string>
+		<string>Screens</string>
 		<string>Gameplay</string>
 		<string>Field</string>
 		<string>Defense</string>

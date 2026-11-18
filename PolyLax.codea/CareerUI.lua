@@ -1,4 +1,4 @@
--- PolyLax Build 012 | Road to the Pros
+-- PolyLax Build 013 | Road to the Pros
 PolyLax = PolyLax or {}
 local P = PolyLax
 local UI = {}
@@ -33,15 +33,18 @@ end
 local function overview(l, career, playing, training)
     local width, center, top = l.w,l.x,l.contentTop
     local column = (width-8)*.5
-    l.name = box(center,top-22,width,42,career.name,"name")
+    local fit = math.min(1, (top-l.bottom-72)/309)
+    l.overviewScale = fit
+    l.name = box(center,top-22*fit,width,42*fit,career.name,"name")
     local position = P.Career.positions[career.position] or P.Career.positions[2]
-    l.position = box(l.left+column*.5,top-70,column,43,position.label,"position")
-    l.team = box(l.right-column*.5,top-70,column,43,P.Career.teamName(career),"team")
-    l.summary = box(center,top-134,width,76)
-    l.statsY = top-185
+    l.position = box(l.left+column*.5,top-70*fit,column,43*fit,position.label,"position")
+    l.team = box(l.right-column*.5,top-70*fit,column,43*fit,P.Career.teamName(career),"team")
+    l.summary = box(center,top-134*fit,width,76*fit)
+    l.statsY = top-185*fit
+    l.screenStats = box(center,top-225*fit,width,62*fit)
     if training then
-        l.nextSkill = box(l.left+column*.5,top-225,column,43,training.label,"nextSkill")
-        l.train = box(l.right-column*.5,top-225,column,43,"Train +"..(training.gain or 1),training.key)
+        l.nextSkill = box(l.left+column*.5,top-286*fit,column,43*fit,training.label,"nextSkill")
+        l.train = box(l.right-column*.5,top-286*fit,column,43*fit,"Train +"..(training.gain or 1),training.key)
         l.train.enabled = training.available and not playing or false
         l.training = training
     end
@@ -149,6 +152,23 @@ local function card(item,sub,strong,disabled)
     label(item.label,item.x,item.y-(sub and 7 or 0),strong and 14 or 13,tint,item.w-12)
 end
 
+local function drawScreenStats(l, stats, status)
+    local item, scale = l.screenStats, l.overviewScale
+    local side, width = item.w*.25, item.w*.5-10
+    rectAt(item,surface)
+    label("SCREENS "..(stats.screens or 0),item.x-side,item.y+17*scale,10,white,width)
+    label("SCREEN ASSISTS "..(stats.screenAssists or 0),item.x+side,item.y+17*scale,10,white,width)
+    label("OPEN SHOTS "..(stats.screenOpenShots or 0),item.x-side,item.y+2*scale,10,white,width)
+    label("ILLEGAL SCREENS "..(stats.illegalScreens or 0),item.x+side,item.y+2*scale,10,white,width)
+    local points = status.screenCoachPoints or 0
+    local textValue = string.format("COACH %+d SEASON",points)
+    if status.lastScreenCoach then
+        textValue = textValue..string.format("  ·  %+d LAST GAME",status.lastScreenCoach.points)
+    end
+    local tint = points > 0 and green or points < 0 and red or muted
+    label(textValue,item.x,item.y-18*scale,10,tint,item.w-12)
+end
+
 local function drawOverview(career,l,editing,draft,playing)
     local name = l.name
     if editing then name = box(name.x,name.y,name.w,name.h,(draft or "").."|") end
@@ -156,26 +176,27 @@ local function drawOverview(career,l,editing,draft,playing)
     card(l.position,"POSITION",false,career.games>0 or playing)
     card(l.team,"TEAM",false,career.games>0 or playing)
     local status = l.status or {}
-    local summary, stats = l.summary,career.stats
+    local summary, stats, scale = l.summary,career.stats,l.overviewScale
     rectAt(summary,surface)
     local title = type(status.title) == "string" and status.title
         or status.title == true and "CHAMPIONSHIP WON" or P.Career.stages[career.stage]
-    label(title,l.x,summary.y+25,12,amber,l.w-18)
+    label(title,l.x,summary.y+25*scale,12,amber,l.w-18)
     local xp = math.max(0,career.xp-(career.spentXP or 0))
     label(string.format("RECORD  %d–%d–%d     XP  %d",career.wins,career.losses,career.ties,xp),
-        l.x,summary.y+7,13,white,l.w-18)
+        l.x,summary.y+7*scale,13,white,l.w-18)
     local role = status.starter == true and "STARTER" or status.starter == false and "RESERVE"
     local detail = status.statusLine or ""
     if role then detail = role .. (detail == "" and "" or "  ·  "..detail) end
-    label(detail,l.x,summary.y-11,10,muted,l.w-18)
+    label(detail,l.x,summary.y-11*scale,10,muted,l.w-18)
     local award = (status.championships or 0) > 0 and ("Titles "..status.championships)
     if status.contract then
         award = status.contract .. (award and "  ·  "..award or "")
     end
-    label(award,l.x,summary.y-26,9,muted,l.w-18)
+    label(award,l.x,summary.y-26*scale,9,muted,l.w-18)
     label(string.format("%d G   %d A   %d GB   %d CTO   %d SV   %d FO",
         stats.goals or 0,stats.assists or 0,stats.groundBalls or 0,stats.causedTurnovers or 0,
         stats.saves or 0,stats.faceoffs or 0),l.x,l.statsY,11,white,l.w-10)
+    drawScreenStats(l,stats,status)
     if l.training then
         local training = l.training
         card(l.nextSkill,"SKILL  "..tostring(training.value).."   ›",false)
@@ -198,7 +219,11 @@ local function drawSchedule(l)
         if fixture.current then rectAt(box(l.left+2,item.y,4,item.h),amber) end
         local venue = fixture.home == false and "AT" or "VS"
         leading(venue.."  "..fixture.opponent,l.left+10,item.y+5,12,white,l.w-106)
-        leading(fixture.label,l.left+10,item.y-8,9,muted,l.w-106)
+        local detail = fixture.label
+        if fixture.screenCoachPoints then
+            detail = detail..string.format("  ·  Coach %+d",fixture.screenCoachPoints)
+        end
+        leading(detail,l.left+10,item.y-8,9,muted,l.w-106)
         local result = fixture.result or (fixture.current and "NEXT" or "—")
         label(result,l.right-44,item.y,11,fixture.current and amber or gameResultTint(result),77)
     end

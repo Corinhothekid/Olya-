@@ -126,7 +126,7 @@ local function solveLimb(upper, lower, target, firstLength, secondLength, bend)
     return upperRotation, lowerRotation
 end
 
-local function placeArms(rig, pose, scoopPoint, scoopWeight)
+local function placeArms(rig, pose, pocketTarget, pocketWeight)
     local joints = rig.joints
     local shaft = pose.shaft:normalize()
     local shaftRotation = quat.fromToRotation(vec3(0,1,0), shaft)
@@ -136,8 +136,8 @@ local function placeArms(rig, pose, scoopPoint, scoopWeight)
     local reach = rig.armLengthUpper + rig.armLengthLower - .012
     local top = limited(pose.grip, right, reach)
     local stickRotation = quat.lookRotation(depth, shaft)
-    if scoopPoint then
-        local localPoint = rig.body:inverseTransformPoint(scoopPoint)
+    if pocketTarget then
+        local localPoint = rig.body:inverseTransformPoint(pocketTarget)
         local towardBall = localPoint - right
         local pocket = rotate(stickRotation, rig.pocket.position)
         local distance, stickLength = towardBall:len(), pocket:len()
@@ -149,12 +149,12 @@ local function placeArms(rig, pose, scoopPoint, scoopWeight)
             local reachCosine = clamp((distance * distance + stickLength * stickLength -
                 reach * reach) / (2 * stickLength * distance), -1, 1)
             local correction = math.deg(math.acos(cosine) - math.acos(reachCosine))
-            local rotation = quat.angleAxis(correction * scoopWeight, axis:normalize())
+            local rotation = quat.angleAxis(correction * pocketWeight, axis:normalize())
             stickRotation = quat.lookRotation(rotate(rotation, depth), rotate(rotation, shaft))
         end
-        local scoopGrip = localPoint - rotate(stickRotation, rig.pocket.position)
-        local reachableGrip = limited(limited(scoopGrip, top, .58), right, reach)
-        top = blend(top, reachableGrip, scoopWeight)
+        local targetGrip = localPoint - rotate(stickRotation, rig.pocket.position)
+        local reachableGrip = limited(limited(targetGrip, top, .58), right, reach)
+        top = blend(top, reachableGrip, pocketWeight)
     end
     rig.stickRoot.rotation = stickRotation
     local lowerOffset = rotate(stickRotation, rig.lowerGrip.position)
@@ -298,7 +298,7 @@ function Animation.update(controller, dt, input)
         crouch = 0, roll = cradle * 21 + swing * 8, freeHand = 0
     }
     local pose, event = base, nil
-    local scoopPoint, scoopWeight
+    local pocketTarget, pocketWeight
     if controller.action then
         local clip = Animation.clips[controller.action]
         local oldTime = controller.actionTime
@@ -310,8 +310,11 @@ function Animation.update(controller, dt, input)
         end
         pose = sampleAction(clip, math.min(sampleTime, clip.duration), base, controller.entry)
         if controller.action == "scoop" and input.scoopPoint then
-            scoopWeight = smooth(1 - math.abs(sampleTime - clip.eventTime) / .14)
-            if scoopWeight > 0 then scoopPoint = input.scoopPoint end
+            pocketWeight = smooth(1 - math.abs(sampleTime - clip.eventTime) / .14)
+            if pocketWeight > 0 then pocketTarget = input.scoopPoint end
+        elseif controller.action == "catch" and input.catchPoint then
+            pocketWeight = smooth(1 - math.abs(sampleTime - clip.eventTime) / .14)
+            if pocketWeight > 0 then pocketTarget = input.catchPoint end
         end
         controller.actionTime = newTime
         if newTime >= clip.duration then
@@ -336,7 +339,7 @@ function Animation.update(controller, dt, input)
     joints.head.eulerAngles = vec3(-pose.torso.x * .48, -pose.torso.y * .60, -pose.torso.z * .55)
     placeLeg(rig, joints.leftHip, joints.leftKnee, joints.leftAnkle, left, leftPitch, 6)
     placeLeg(rig, joints.rightHip, joints.rightKnee, joints.rightAnkle, right, rightPitch, -6)
-    placeArms(rig, pose, scoopPoint, scoopWeight)
+    placeArms(rig, pose, pocketTarget, pocketWeight)
     return event
 end
 

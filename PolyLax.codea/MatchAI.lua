@@ -1,5 +1,6 @@
--- PolyLax Build 011 | MatchAI
+-- PolyLax Build 013 | MatchAI
 PolyLax = PolyLax or {}
+local P = PolyLax
 local AI = {}
 PolyLax.MatchAI = AI
 
@@ -98,53 +99,9 @@ local function nearestOpponent(match, player)
     return best, math.sqrt(bestDistance)
 end
 
-local function laneDanger(match, from, to)
-    local x, z = to.x-from.x, to.z-from.z
-    local lengthSquared = x*x + z*z
-    if lengthSquared < .001 then return math.huge end
-    local risk = 0
-    for _, id in ipairs(match.teams[3 - from.team]) do
-        local defender = match.squad[id]
-        local fraction = clamp(((defender.x-from.x)*x + (defender.z-from.z)*z) / lengthSquared, 0, 1)
-        local anticipation = fraction * .25
-        local px = defender.x + (defender.vx or 0) * anticipation
-        local pz = defender.z + (defender.vz or 0) * anticipation
-        local distance = planDistance(px, pz, from.x + x*fraction, from.z + z*fraction)
-        if fraction > .07 and distance < 2.3 then
-            risk = math.max(risk, (2.3 - distance) * (fraction > .90 and .8 or 1))
-        end
-    end
-    return risk
-end
-
 function AI.passTarget(match, fromID, swing)
-    local from = match.squad[fromID]
-    if not from then return nil end
-    local goal = match.goalsByTeam[from.team]
-    local gainSign = from.team == 1 and -1 or 1
-    local best, rating = nil, -math.huge
-    for _, targetID in ipairs(match.teams[from.team]) do
-        local to = match.squad[targetID]
-        local distance = planDistance(from.x, from.z, to.x, to.z)
-        if targetID ~= fromID and to.role ~= "G" and distance >= 2 and distance <= 34 then
-            local advance = (to.z - from.z) * gainSign
-            local risk = laneDanger(match, from, to)
-            local _, space = nearestOpponent(match, to)
-            local score = 5.8 - math.abs(distance - 10) * .12 - risk * 2.6
-            score = score + math.min(space, 7) * .38 + clamp(advance, -9, 15) * .12
-            if from.role == "G" then
-                score = score + math.min(math.abs(to.x), 15) * .08 + clamp(advance, -12, 24) * .16
-            elseif swing then
-                score = score + math.min(math.abs(to.x-from.x), 21) * .16
-                if to.x * from.x < 0 then score = score + .5 end
-            else
-                local goalDistance = planDistance(to.x, to.z, goalX(goal), goal.z)
-                if goalDistance < 14 then score = score + 1.5 - goalDistance * .06 end
-            end
-            if score > rating then best, rating = targetID, score end
-        end
-    end
-    return best, rating
+    local target, detail = P.Tactics.choose(match, fromID, swing and "SWING" or "SAFE")
+    return target, detail and detail.score
 end
 
 local function moveKeeper(match, keeper, intent, ball, sightTime)
@@ -172,7 +129,75 @@ local function moveKeeper(match, keeper, intent, ball, sightTime)
 end
 
 local function teamSlot(player)
-    return (player.id - 1) % 10 + 1
+    return player.slot or (player.id - 1) % 10 + 1
+end
+
+local function useScreen(match, ai, tactic, carrier, defender, pressure, depth, goal, intent)
+    local screens = P.Screens
+    if not screens then return false end
+    local now = ai.elapsed
+    local screen = match.screen
+    if not screen and defender and pressure > 1.15 and pressure < 4.2
+        and depth > 7 and depth < 23 and not carrier.anim.action
+        and now >= (tactic.nextPick or 0) then
+        local plan = P.Tactics.pick(match, carrier.id, defender.id)
+        if plan then
+            screen = screens.request(match, plan.screener, carrier.id, defender.id, plan)
+            if screen then tactic.nextPick = now + 5 end
+        end
+    end
+    if not screen or screen.user ~= carrier.id then return false end
+
+    local towardX, towardZ = unit(goalX(goal) - screen.x, goal.z - screen.z)
+    if screen.phase == "APPROACH" or screen.phase == "PLANT" then
+        -- Stay on the entry side while the screener gets both feet set.
+        move(intent, screen.x - towardX*1.65 - towardZ*screen.side*.65,
+            screen.z - towardZ*1.65 + towardX*screen.side*.65)
+        intent.speed, intent.role = 2.9, "WAIT FOR PICK"
+        return true
+    end
+    if screen.phase == "HOLD" then
+        local tangentX, tangentZ = -towardZ*screen.side, towardX*screen.side
+        local vx, vz = unit(screen.x + towardX*2.7 + tangentX*1.06 - carrier.x,
+            screen.z + towardZ*2.7 + tangentZ*1.06 - carrier.z)
+        move(intent, carrier.x + vx*3.6, carrier.z + vz*3.6)
+        intent.speed, intent.role = 7.7, "USE PICK"
+        if not match.pending and not carrier.anim.action and (screen.contact or pressure < 2.6)
+            and now >= (tactic.nextDodge or 0) then
+            intent.action, intent.moveX, intent.moveZ = "dodge", vx, -vz
+            tactic.nextDodge = now + 1.4
+        end
+        return true
+    end
+    if screen.phase == "RELEASE" and not match.pending and not carrier.anim.action then
+        local receiver = match.squad[screen.screener]
+        local gap = planDistance(carrier.x, carrier.z, receiver.x, receiver.z)
+        if gap > 2.1 and gap < 14 and P.Tactics.opponentSpace(match, receiver) > 1.7
+            and P.Tactics.laneRisk(match, carrier, receiver) < 1.25
+            and now >= (tactic.nextAction or 0) then
+            intent.action, intent.target = "pass", receiver.id
+            intent.tactic = {call="PICK DOWN", from=carrier.id, target=receiver.id,
+                team=carrier.team, untilTime=(match.elapsed or 0) + 2}
+            tactic.nextAction = now + .9
+            return true
+        end
+    end
+    return false
+end
+
+local function tacticalPass(match, tactic, carrierID, pressure, depth, now)
+    local call
+    if match.mode == "SWING" or match.mode == "CLEAR" or match.mode == "PASS DOWN" then
+        call = match.mode
+    elseif now >= (tactic.nextCall or 0) then
+        if pressure < 2 and depth > 9 then call = "CLEAR"
+        elseif depth > 8 and depth < 25 and pressure < 4.1 then call = "PASS DOWN"
+        elseif depth < 26 then call = "SWING" end
+    end
+    if not call then return nil end
+    local target, detail = P.Tactics.choose(match, carrierID, call)
+    if target then tactic.nextCall = now + 2.2 end
+    return target, detail
 end
 
 local function offBallAttack(match, ai, snapshot, team)
@@ -185,6 +210,7 @@ local function offBallAttack(match, ai, snapshot, team)
     local spread = clamp(math.abs(ball.x - cx) * .18, 0, 3.5)
     local sides, depths = {-8.8, 8.8, 0, -6.4, 6.4, 0}, {10.4, 10.4, -4, 18.5, 18.5, 7}
     local tactic = ai.tactics[team]
+    local cut = P.Tactics.activeCut(match)
     local carrierID = match.carrier
     local carrier = carrierID and match.squad[carrierID]
     for _, identifier in ipairs(match.teams[team]) do
@@ -217,10 +243,14 @@ local function offBallAttack(match, ai, snapshot, team)
             intent.lookX, intent.lookZ = ball.x, ball.z
             intent.role = "RELEASE SUPPORT"
         end
+        if cut and cut.team == team and cut.cutID == identifier then
+            move(intent, cut.cutX, cut.cutZ)
+            intent.lookX, intent.lookZ, intent.speed = ball.x, ball.z, 7.4
+            intent.role = cut.call == "CLEAR" and "CLEAR THROUGH" or "PASS DOWN CUT"
+        end
     end
 
     if not carrier or carrier.team ~= team or carrier.role == "G" then
-        tactic.picker = nil
         return
     end
     local defender, pressure = nearestOpponent(match, carrier)
@@ -251,36 +281,9 @@ local function offBallAttack(match, ai, snapshot, team)
         tactic.cut = nil
     end
 
-    -- Reserve one nearby support player for a stationary pick. Vacate the slot
-    -- once the carrier moves, then let the picker return to the offense.
-    local pick = tactic.picker
-    if pick and (now >= tactic.pickEnds or tactic.pickCarrier ~= carrierID
-            or distanceSquared(carrier.x, carrier.z, tactic.pickStartX, tactic.pickStartZ) > 12) then
-        tactic.picker, tactic.nextPick, pick = nil, now + 3, nil
-    end
-    if not pick and defender and pressure > 1 and pressure < 3.4 and distance > 7 and distance < 21
-            and now >= (tactic.nextPick or 0) then
-        local best = 36
-        for _, identifier in ipairs(match.teams[team]) do
-            local player = match.squad[identifier]
-            if identifier ~= carrierID and player.role == "M" then
-                local d = distanceSquared(player.x, player.z, defender.x, defender.z)
-                if d < best then pick, best = identifier, d end
-            end
-        end
-        if pick then
-            local side = carrier.x < 0 and -1 or 1
-            tactic.picker, tactic.pickCarrier, tactic.pickEnds = pick, carrierID, now + 1.05
-            tactic.pickStartX, tactic.pickStartZ = carrier.x, carrier.z
-            tactic.pickX, tactic.pickZ = defender.x + side*1.22, defender.z - inside*.58
-        end
-    end
-    if pick then
-        local reserved = ai.intents[pick]
-        move(reserved, tactic.pickX, tactic.pickZ)
-        reserved.lookX, reserved.lookZ = ball.x, ball.z
-        reserved.role = "PICK"
-    end
+    if carrierID == match.controlled and not match.careerWaiting then return end
+    if not match.pending and not match.flight
+        and useScreen(match, ai, tactic, carrier, defender, pressure, distance, goal, intent) then return end
 
     if match.pending or match.flight or carrier.anim and carrier.anim.action then return end
     if now < (tactic.nextAction or 0) then return end
@@ -305,9 +308,14 @@ local function offBallAttack(match, ai, snapshot, team)
         end
     end
     if not intent.action and (pressure < 3.8 or distance < 25 or match.mode == "SWING") then
-        local target, score = AI.passTarget(match, carrierID, match.mode == "SWING")
+        local target, detail = tacticalPass(match, tactic, carrierID, pressure, distance, now)
+        local score = detail and detail.score
+        if not target and match.mode ~= "CLEAR" then
+            target, score = AI.passTarget(match, carrierID, false)
+        end
         if target and score > 2.5 then
             intent.action, intent.target = "pass", target
+            intent.tactic = detail
             tactic.nextAction = now + .68
         end
     end
@@ -409,6 +417,83 @@ local function coordinateSlide(match, tactic, goal, carrier)
     tactic.secondSlide = second
 end
 
+local function swapMark(marks, defender, assignment)
+    local old = marks[defender]
+    for id, other in pairs(marks) do
+        if id ~= defender and other == assignment then
+            marks[id] = old
+            break
+        end
+    end
+    marks[defender] = assignment
+end
+
+local function obstructed(screen, x, z, tx, tz)
+    local fx, fz = tx - x, tz - z
+    local span = fx*fx + fz*fz
+    if span < .01 then return false end
+    local at = ((screen.x-x)*fx + (screen.z-z)*fz) / span
+    return at >= -.04 and at <= 1.18
+        and planDistance(screen.x, screen.z, x + fx*at, z + fz*at) < 1.02
+end
+
+local function defendScreen(match, ai, tactic, team, carrier)
+    local swap = tactic.screenSwitch
+    if swap and (ai.elapsed >= swap.untilTime or not carrier
+        or (carrier.id ~= swap.user and carrier.id ~= swap.screener)) then
+        tactic.screenSwitch, swap = nil, nil
+    end
+    local screen = match.screen
+    if not swap and screen and screen.team ~= team and carrier and carrier.id == screen.user
+        and screen.defender and tactic.mark[screen.defender] and screen.phase == "HOLD" then
+        local held = match.squad[screen.defender]
+        if screen.contact or obstructed(screen, held.x, held.z, carrier.x, carrier.z) then
+            local gap = planDistance(held.x, held.z, carrier.x, carrier.z)
+            local helper, best = nil, math.huge
+            for _, id in ipairs(match.teams[team]) do
+                local assignment = tactic.mark[id]
+                if id ~= held.id and assignment then
+                    local help = match.squad[id]
+                    local cover = planDistance(help.x, help.z, carrier.x, carrier.z)
+                    local partner = assignment == screen.screener
+                    if cover < 4.6 and (partner or screen.contact and cover < gap - .25)
+                        and cover < gap + (screen.contact and 1.15 or .15) then
+                        local score = cover - (partner and .95 or 0)
+                        if score < best then helper, best = id, score end
+                    end
+                end
+            end
+            if helper then
+                swap = {user=screen.user, screener=screen.screener, on=helper,
+                    off=held.id, untilTime=ai.elapsed + 1.25}
+                tactic.screenSwitch = swap
+            end
+        end
+    end
+    if swap then
+        swapMark(tactic.mark, swap.on, swap.user)
+        swapMark(tactic.mark, swap.off, swap.screener)
+        tactic.primary = carrier.id == swap.user and swap.on or swap.off
+    end
+    return swap
+end
+
+local function routeAroundScreen(screen, player, intent, goal)
+    if not screen or screen.phase ~= "HOLD" or screen.defender ~= player.id then return false end
+    local ux, uz = unit(intent.x - player.x, intent.z - player.z)
+    local gap = planDistance(player.x, player.z, screen.x, screen.z)
+    if gap > 3.3 or not obstructed(screen, player.x, player.z, intent.x, intent.z) then return false end
+    -- Pick the goal side when available. Lead the waypoint past the obstacle so
+    -- the next decision resumes the assignment instead of aiming at its edge.
+    local goalDx, goalDz = goalX(goal) - screen.x, goal.z - screen.z
+    local over = -uz*goalDx + ux*goalDz >= 0 and 1 or -1
+    local clearance = screen.contact and 1.48 or 1.22
+    move(intent, screen.x - uz*over*clearance + ux*.83, screen.z + ux*over*clearance + uz*.83)
+    intent.speed = screen.contact and 4.4 or 5.7
+    intent.role = screen.contact and "SCREEN RECOVERY" or gap < 1.65 and "FIGHT OVER" or "GO AROUND"
+    return true
+end
+
 local function defend(match, ai, snapshot, team)
     local goal = match.goalsByTeam[3 - team]
     local gx = goalX(goal)
@@ -416,26 +501,10 @@ local function defend(match, ai, snapshot, team)
     local carrierID = match.carrier
     local carrier = carrierID and match.squad[carrierID]
     local tactic = chooseMatchups(match, ai, team, goal, carrier)
+    local switching = defendScreen(match, ai, tactic, team, carrier)
     coordinateSlide(match, tactic, goal, carrier)
     local onBall = tactic.firstSlide or tactic.primary
     local inside = goal.z < 0 and 1 or -1
-    local offense = ai.tactics[3 - team]
-
-    -- A defender arriving at an established pick hands the matchup to help.
-    local picker = offense.picker and match.squad[offense.picker]
-    if picker and carrier and onBall and not tactic.firstSlide
-            and planDistance(picker.x, picker.z, offense.pickX, offense.pickZ) < .7 then
-        local held = match.squad[onBall]
-        if planDistance(held.x, held.z, picker.x, picker.z) < 1.35 then
-            for _, identifier in ipairs(match.teams[team]) do
-                if tactic.mark[identifier] == picker.id and identifier ~= onBall then
-                    tactic.mark[onBall], tactic.mark[identifier] = picker.id, carrier.id
-                    tactic.primary, onBall = identifier, identifier
-                    break
-                end
-            end
-        end
-    end
 
     for _, identifier in ipairs(match.teams[team]) do
         local player = match.squad[identifier]
@@ -448,13 +517,16 @@ local function defend(match, ai, snapshot, team)
             local spacing = identifier == tactic.firstSlide and 1.48 or 1.26
             move(intent, carrier.x + fx*spacing, carrier.z + fz*spacing)
             intent.lookX, intent.lookZ = carrier.x, carrier.z
-            intent.role = identifier == tactic.firstSlide and "FIRST SLIDE" or "BALL PRESSURE"
+            intent.role = identifier == tactic.firstSlide and "FIRST SLIDE"
+                or switching and "SCREEN SWITCH" or "BALL PRESSURE"
             local gap = planDistance(player.x, player.z, carrier.x, carrier.z)
             intent.speed = gap < 3.4 and 4.4 or 7.2
-            local canCheck, style = AI.canCheck(match, identifier, carrierID)
-            if canCheck and ai.elapsed >= (tactic.nextCheck or 0) then
-                intent.action, intent.target = style, carrierID
-                tactic.nextCheck = ai.elapsed + .72
+            if not routeAroundScreen(match.screen, player, intent, goal) then
+                local canCheck, style = AI.canCheck(match, identifier, carrierID)
+                if canCheck and ai.elapsed >= (tactic.nextCheck or 0) then
+                    intent.action, intent.target = style, carrierID
+                    tactic.nextCheck = ai.elapsed + .72
+                end
             end
         elseif mark then
             if identifier == tactic.secondSlide then mark = tactic.mark[tactic.firstSlide] end
@@ -476,6 +548,7 @@ local function defend(match, ai, snapshot, team)
             end
             move(intent, x, z)
             intent.lookX, intent.lookZ = ball.x, ball.z
+            routeAroundScreen(match.screen, player, intent, goal)
         else
             local support = clamp((ball.z-goal.z)*inside + 9, 32, match.field.halfLength*1.48)
             move(intent, player.homeX + ball.x*.13, goal.z + support*inside)
@@ -690,6 +763,7 @@ function AI.update(match, dt)
         if not ai.intents[id] then ai.intents[id] = {x=player.x, z=player.z} end
         local intent = ai.intents[id]
         intent.action, intent.target, intent.aim, intent.style = nil, nil, nil, nil
+        intent.tactic, intent.moveX, intent.moveZ = nil, nil, nil
     end
     if match.phase ~= "LIVE" then
         ai.nextTick = ai.elapsed

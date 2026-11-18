@@ -1,13 +1,7 @@
 # PolyLax
 
-PolyLax is a portrait 3D lacrosse game for Codea Legacy Craft on iPhone. Build 012 includes the player creator, six-player Practice, 10v10 Full Game, and Road to the Pros career play.
+PolyLax is a portrait 3D lacrosse game for Codea Legacy Craft on iPhone. Build 013 includes the player creator, six-player Practice, 10v10 Full Game, and Road to the Pros career play. It adds directional passing, a handheld controller layout, four positional play calls, and player-controlled picks.
 
-## Install
+Import the full `PolyLax.codea` project or copy its 21 complete Lua files into Codea in the order listed in `Info.plist`. See [Build 013's controls, changes, and test checklist](docs/BUILD_013.md). The [Build 012 checklist](docs/BUILD_012.md) describes the recovery build.
 
-Import the complete `PolyLax.codea` project or copy all 18 Lua files into Codea tabs in the order given by `PolyLax.codea/Info.plist`. Use the single-tab Lua release file when installing by pasting into one `Main` tab. Both editions use assets built into Craft.
-
-See [Build 012 installation, changes, and test checklist](docs/BUILD_012.md). Lua and mocked Craft tests passed. Native iPhone testing remains pending.
-
-## History
-
-The active project starts from the workspace Build 011 Gameplay recovery commit. The five historical standalone versions remain as reference snapshots in `archive/`. This Build 012 branch keeps the recovery commit and the six implementation stages in order.
+The branch preserves the original Build 012 tree in a recovery commit. Earlier standalone versions remain in `archive/`.

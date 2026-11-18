@@ -1,4 +1,4 @@
--- PolyLax Build 012 | Creator and match HUD
+-- PolyLax Build 013 | Creator and match HUD
 PolyLax = PolyLax or {}
 local UI = {}
 PolyLax.UI = UI
@@ -167,8 +167,6 @@ end
 
 local glass = color(10, 21, 38, 222)
 local glassSoft = color(14, 26, 43, 188)
-local control = color(32, 54, 79, 238)
-local outline = color(119, 155, 187, 108)
 local muted = color(169, 190, 210)
 local sky = color(117, 204, 255)
 local warm = color(255, 217, 98)
@@ -250,40 +248,68 @@ function UI.practiceLayout()
     local safe = UI.safeArea()
     local left, right = safe.left+12, WIDTH-safe.right-12
     local width, header = right-left, HEIGHT-safe.top
-    local footer = math.max(12,safe.bottom+8)
-    local row = math.min(55,math.max(50,HEIGHT*.085))
-    local actionLeft = left+width*.37
-    local actionWidth = (right-actionLeft)/3
-    local joyRadius = math.min(40,width*.135,row*.68)
-    local panelHeight = footer+row*2+11
-    local joyX, joyY = (left+actionLeft)*.5, footer+joyRadius+2
+    local footer = math.max(12,safe.bottom+6)
+    local tacticalHeight = 36
+    local controlBase = footer+tacticalHeight+8
+    local diameter = math.min(63,width*.205)
+    local bX = right-diameter*.5-2
+    local aX = bX-diameter-6
+    local joyMaxX = left+math.min(width*.31,104)
+    local joyX = (left+joyMaxX)*.5
+    local joyRadius = math.min(39,(joyMaxX-left)*.44)
+    local joyY = controlBase+joyRadius+1
+    local auxRight = aX-diameter*.5-5
+    local auxX = (joyMaxX+auxRight)*.5
+    local auxWidth = math.min(64,auxRight-joyMaxX-4)
+    local panelHeight = math.max(joyY+joyRadius+30,controlBase+diameter+36)
     local cameraW = math.max(106,math.min(137,width*.37))
 
     local layout = {
         panelHeight=panelHeight, headerY=header, leftX=left, rightX=right,
         centerX=(left+right)*.5, width=width, footer=footer, touches={}, motion={},
-        frame={bottom=panelHeight+6,top=header-120},
-        joyX=joyX, joyY=joyY, joyRadius=joyRadius, joyMaxX=actionLeft,
-        commands={},
+        frame={bottom=panelHeight+6,top=header-117},
+        joyX=joyX, joyY=joyY, joyRadius=joyRadius, joyMaxX=joyMaxX, joyMinY=controlBase,
+        commands={}, tactical={},
         edit=box(right-25,header-60,50,32,"EDIT","edit"),
         reset=box(right-81,header-60,54,32,"RESET","reset"),
         zoomIn=box(right-18,header-98,36,33,"+","zoomIn"),
         zoomOut=box(right-58,header-98,36,33,"-","zoomOut"),
         camera=box(right-80-cameraW*.5,header-98,cameraW,33,"CAMERA","camera"),
-        sprint=box(joyX,footer+row*2-12,math.min(width*.34,120),30,"SPRINT","sprint")
+        sprint=box(joyX,joyY+joyRadius+16,math.min(78,joyMaxX-left-6),28,"SPRINT","sprint")
     }
-    local names = {"swing","clear","switch","dodge","pass","shoot"}
-    for index, name in ipairs(names) do
-        local column, rowIndex = (index-1)%3, math.floor((index-1)/3)
-        layout.commands[index] = box(actionLeft+(column+.5)*actionWidth,
-            footer+(1.5-rowIndex)*row,actionWidth-6,row-6,name:upper(),name)
+
+    local primaryA = box(aX,controlBase+diameter*.5,diameter,diameter,"PASS","pass")
+    local primaryB = box(bX,controlBase+diameter*.89,diameter,diameter,"SHOOT","shoot")
+    primaryA.primary, primaryB.primary = "A","B"
+    layout.primaryA, layout.primaryB = primaryA, primaryB
+    layout.commands = {
+        box(auxX,controlBase+18,auxWidth,33,"DODGE","dodge"),
+        box(auxX,controlBase+57,auxWidth,33,"PICK","setpick"),
+        box(aX,controlBase+diameter+19,math.min(61,diameter),31,"SWITCH","switch"),
+        primaryA, primaryB
+    }
+
+    layout.tacticalPanel = box(layout.centerX,footer+tacticalHeight*.5,width+8,tacticalHeight+6)
+    local tactical = {
+        {"swing","SWING"}, {"clear","CLEAR"}, {"passdown","PASS DOWN"}, {"pickdown","PICK DOWN"}
+    }
+    local span = width/#tactical
+    for i,pair in ipairs(tactical) do
+        local item = box(left+span*(i-.5),layout.tacticalPanel.y,span-5,tacticalHeight,pair[2],pair[1])
+        item.tactical = true
+        layout.tactical[i] = item
+        layout.commands[#layout.commands+1] = item
     end
     return layout
 end
 
-local defenseActions = {dodge="poke",pass="slap",shoot="body",switch="switch"}
-local legacyDefense = {dodge="poke",switch="switch"}
-local faceoffActions = {shoot="faceoff",dodge="counter"}
+local faceoffActions = {shoot="faceoff",pass="counter"}
+local defenseActions = {pass="poke",shoot="body",dodge="slap",switch="switch"}
+local legacyDefense = {pass="poke",switch="switch"}
+
+local function holderOf(game)
+    return game.carrier and game.squad[game.carrier]
+end
 
 function UI.action(game, item)
     if not item then return nil end
@@ -292,32 +318,33 @@ function UI.action(game, item)
     if game.phase == "FACEOFF" then
         local draw = game.faceoff
         if draw and (draw.userTeam == false or draw.phase == "EXIT") then return nil end
-        if id == "dodge" and (not draw or draw.meter == nil) then return nil end
+        if id == "pass" and (not draw or draw.meter == nil) then return nil end
         return faceoffActions[id]
     end
     if game.homeScore ~= nil and game.phase ~= "LIVE" then return nil end
-    if game.inNet then return nil end
+    if game.inNet or game.clock and game.clock <= 0 then return nil end
     if id == "pass" and game.loose then return "scoop" end
-    local holder = game.carrier and game.squad[game.carrier]
+    local holder = holderOf(game)
     if game.homeScore ~= nil and holder and holder.team == 2 then
         return (PolyLax.Defense and defenseActions or legacyDefense)[id]
     end
+    if item.tactical and (not holder or game.pending or game.flight) then return nil end
+    if id == "setpick" then
+        local player = game.squad[game.controlled]
+        if not holder or game.carrier == game.controlled or player and player.role == "G"
+            or game.screen and game.screen.screener ~= game.controlled then return nil end
+    end
+    if id == "shoot" and game.carrier ~= game.controlled then return nil end
+    if id == "pass" and not holder then return nil end
+    if id == "sprint" and game.homeScore ~= nil and not holder then return nil end
     return id
 end
 
 local icons = {
-    swing={{-8,-3,5,-3},{5,-3,1,-7},{5,-3,1,1},{8,3,-5,3},{-5,3,-1,7},{-5,3,-1,-1}},
-    clear={{-8,-5,1,4},{1,4,7,4},{7,4,4,7},{7,4,4,1},{0,-5,7,-5}},
+    setpick={{-2,-7,-2,7},{2,-7,2,7},{-8,0,-2,0},{2,0,8,0}},
     switch={{-7,3,7,3},{7,3,3,7},{7,3,3,-1},{7,-3,-7,-3},{-7,-3,-3,-7},{-7,-3,-3,1}},
     dodge={{-7,-5,-2,3},{-2,3,2,-2},{2,-2,8,5},{8,5,4,5},{8,5,8,1}},
-    pass={{-8,-4,7,4},{7,4,0,5},{7,4,3,-2},{-7,1,-3,3}},
-    shoot={{-7,6,7,6},{-7,-6,7,-6},{-7,6,-7,-6},{7,6,7,-6},{-3,0,3,0},{0,-3,0,3}},
-    scoop={{-8,-5,2,-5},{2,-5,7,0},{7,0,7,4},{3,3,7,7},{7,7,10,3}},
-    poke={{-7,-5,7,5},{7,5,2,5},{7,5,6,0},{-7,1,-3,1}},
     slap={{-8,6,-2,3},{-2,3,7,-6},{-7,-3,-3,-3},{-5,-5,-5,-1},{2,6,7,6}},
-    body={{0,7,0,-7},{-6,2,6,2},{-6,2,-8,-2},{6,2,8,-2},{-5,-7,0,-3},{0,-3,5,-7}},
-    faceoff={{-8,6,0,-3},{8,6,0,-3},{-5,-4,5,-4},{-3,-7,3,-7}},
-    counter={{-7,-5,-7,3},{-7,3,5,3},{5,3,1,7},{5,3,1,-1},{1,-4,7,-4}},
     sprint={{-7,6,-1,0},{-1,0,-7,-6},{1,6,7,0},{7,0,1,-6}},
     camera={{-8,5,4,5},{4,5,4,-5},{4,-5,-8,-5},{-8,-5,-8,5},{4,2,8,5},{8,5,8,-5},{8,-5,4,-2}},
     zoomIn={{-5,0,5,0},{0,-5,0,5}},
@@ -353,19 +380,39 @@ local function chip(layout, item, name, symbol, emphatic)
     end
 end
 
-local primaryControl = color(244,195,74,239)
-local defensiveControl = color(48,56,78,242)
-local function actionButton(layout, item, action, textValue, active)
+local primaryBlue = color(30,104,217,245)
+local primaryRed = color(194,47,63,245)
+local primaryOff = color(41,53,68,212)
+local primaryRim = color(168,193,211,177)
+local graphite = color(34,42,52,241)
+local graphiteDim = color(26,33,42,228)
+local graphiteEdge = color(107,122,136,132)
+
+local function compactAction(layout, item, action, textValue, active)
+    local press = 1-.06*motionAmount(layout,item)
+    local fillTint = active and warm or action and graphite or graphiteDim
+    local textTint = active and navy or action and white or muted
+    rounded(item.x,item.y,item.w,item.h,9,graphiteEdge,press)
+    rounded(item.x,item.y,item.w-2,item.h-2,8,fillTint,press)
+    local symbol = not item.tactical and item.w >= 54 and (action or item.id)
+    local hasSymbol = symbol and icons[symbol]
+    if hasSymbol then
+        icon(symbol,item.x-item.w*.5+11,item.y,.63,active and navy or muted)
+    end
+    label(textValue,item.x+(hasSymbol and 5 or 0),item.y,item.w < 51 and 9 or 10,textTint)
+end
+
+local function primaryAction(layout, item, action, textValue, active)
     local press = 1-.085*motionAmount(layout,item)
-    local primary = action == "shoot" or action == "faceoff"
-    local defense = action == "body" or action == "poke" or action == "slap"
-    local background = active and warm or primary and primaryControl or defense and defensiveControl or control
-    local ink = (active or primary) and navy or white
-    local accent = (active or primary) and navy or defense and red or sky
-    rounded(item.x,item.y,item.w,item.h,13,outline,press)
-    rounded(item.x,item.y,item.w-2,item.h-2,12,background,press)
-    icon(action,item.x,item.y+7,.91*press,accent)
-    label(textValue,item.x,item.y-12,item.w < 49 and 9 or 10,ink)
+    local span = item.w*press
+    local fillTint = action and (item.primary == "A" and primaryBlue or primaryRed) or primaryOff
+    fill(active and warm or primaryRim)
+    ellipseMode(CENTER)
+    ellipse(item.x,item.y,span+2)
+    fill(fillTint)
+    ellipse(item.x,item.y,span-2)
+    label(item.primary,item.x,item.y+6,23,action and white or muted)
+    label(textValue,item.x,item.y-13,item.w < 51 and 8 or 9,action and white or muted)
 end
 
 local function drawAim(guide)
@@ -427,18 +474,23 @@ local function drawScore(layout, game)
     chip(layout,layout.edit,"EDIT")
 end
 
-local stickCenter = color(145,185,224,76)
+local stickFace = color(17,23,30,225)
+local stickThumb = color(89,102,116,236)
+local stickLight = color(145,158,173,184)
 local function drawJoystick(layout, x, y)
     local r, jx, jy = layout.joyRadius, layout.joyX, layout.joyY
+    local knobX, knobY = jx+x*r*.58,jy+y*r*.58
     ellipseMode(CENTER)
-    fill(outline)
+    fill(graphiteEdge)
     ellipse(jx,jy,r*2+2)
-    fill(glass)
+    fill(graphite)
     ellipse(jx,jy,r*2)
-    fill(stickCenter)
-    ellipse(jx,jy,r*.89)
-    fill(sky)
-    ellipse(jx+x*r*.63,jy+y*r*.63,r*.76)
+    fill(stickFace)
+    ellipse(jx,jy,r*1.69)
+    fill(stickLight)
+    ellipse(knobX,knobY,r*.86)
+    fill(stickThumb)
+    ellipse(knobX,knobY,r*.78)
 end
 
 local function clamp01(value)
@@ -513,30 +565,72 @@ local function drawBallEdge(mark)
     noStroke()
 end
 
-function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel, ballEdge)
+local function passTarget(layout, guide)
+    if not guide or guide.y < layout.frame.bottom or guide.y > layout.frame.top
+        or guide.x < layout.leftX or guide.x > layout.rightX then return end
+    local x, y = guide.x,guide.y
+    local tint = guide.manual and sky or white
+    ellipseMode(CENTER)
+    stroke(tint)
+    strokeWidth(guide.manual and 2.5 or 1.5)
+    noFill()
+    ellipse(x,y,guide.manual and 26 or 20)
+    noStroke()
+    if guide.name and guide.name ~= "" then
+        local w = math.min(124,math.max(38,#guide.name*6+14))
+        local bx = math.max(layout.leftX+w*.5,math.min(layout.rightX-w*.5,x))
+        local by = y+21 < layout.frame.top and y+21 or y-21
+        rounded(bx,by,w,18,7,glass)
+        label(guide.name,bx,by,10,tint)
+    end
+end
+
+local function tacticMode(game)
+    local value = game.mode
+    if type(game.tactical) == "table" and game.tactical.team ~= 2 then
+        value = game.tactical.call or game.tactical.mode or game.tactical.name or value
+    elseif type(game.tactical) == "string" then
+        value = game.tactical
+    end
+    return type(value) == "string" and value:gsub("[%s_%-]",""):lower()
+end
+
+local function commandLabel(item, action, game, aim)
+    if action == "shoot" and aim then return "AIM" end
+    if action == "pass" and game.carrier and game.carrier ~= game.controlled then return "CALL" end
+    return actionNames[action] or item.label
+end
+
+function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel, ballEdge, passGuide)
     beginHud()
     drawAim(aim)
     drawBallEdge(ballEdge)
+    passTarget(layout,passGuide)
     drawScore(layout,game)
     chip(layout,layout.camera,cameraLabel or "CAMERA","camera")
     chip(layout,layout.zoomOut,"","zoomOut")
     chip(layout,layout.zoomIn,"","zoomIn")
 
-    local y = (layout.panelHeight+layout.footer)*.5
-    rounded(layout.centerX,y,layout.width+8,layout.panelHeight-layout.footer+12,20,glassSoft)
+    local bar = layout.tacticalPanel
+    rounded(bar.x,bar.y,bar.w,bar.h,11,glassSoft)
     drawJoystick(layout,moveX,moveZ)
-    if UI.action(game,layout.sprint) then
-        chip(layout,layout.sprint,"SPRINT","sprint",motionAmount(layout,layout.sprint)>.1)
-    end
+    local sprintAction = UI.action(game,layout.sprint)
+    compactAction(layout,layout.sprint,sprintAction,"SPRINT",
+        sprintAction and motionAmount(layout,layout.sprint)>.1)
 
+    local mode = tacticMode(game)
+    local screen = game.screen
+    local settingPick = screen and screen.phase ~= "RELEASE" and screen.screener == game.controlled
     for _, item in ipairs(layout.commands) do
         local action = UI.action(game,item)
-        if action then
-            local active = action == "clear" and game.mode == "CLEAR"
-                or action == "swing" and game.mode == "SWING"
-                or action == "shoot" and aim ~= nil
-            local textValue = action == "shoot" and aim and "AIM" or actionNames[action] or item.label
-            actionButton(layout,item,action,textValue,active)
+        local active = item.tactical and mode == item.id
+            or action == "shoot" and aim ~= nil
+            or action == "setpick" and settingPick
+        local title = commandLabel(item,action,game,aim)
+        if item.primary then
+            primaryAction(layout,item,action,title,active)
+        else
+            compactAction(layout,item,action,title,active)
         end
     end
 

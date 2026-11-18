@@ -1,4 +1,4 @@
--- PolyLax Build 011 | FullMatch
+-- PolyLax Build 013 | FullMatch
 PolyLax = PolyLax or {}
 local P = PolyLax
 local Match = {}
@@ -55,6 +55,21 @@ function Match.recordStat(match, index, key, amount)
     end
     team[key] = (team[key] or 0) + increment
 end
+
+local screenEvaluation = {screens=2, screenAssists=3, screenOpenShots=2, illegalScreens=-4}
+
+local function screenStat(match, index, key, detail)
+    Match.recordStat(match,index,key)
+    local points = screenEvaluation[key]
+    if not points then return end
+    Match.recordStat(match,index,"screenCoachPoints",points)
+    if match.careerWaiting and index==match.careerPlayer then return end
+    local events = match.squad[index].screenCoachEvents
+    events[#events+1] = {kind=key,points=points,time=match.elapsed,
+        user=detail and detail.user,defender=detail and detail.defender}
+end
+
+local screenFoul
 
 local function matchRules(options)
     options = options or {}
@@ -148,6 +163,8 @@ end
 
 local function startFaceoff(match)
     local afterPeriod = match.phase == "INTERMISSION"
+    P.Screens.reset(match)
+    match.tactical, match.cut, match.swingDirection = nil, nil, nil
     match.assist = nil
     match.phase, match.phaseTime = "FACEOFF", 0
     match.mode, match.clearTime = "SET", 0
@@ -191,7 +208,7 @@ local function resetMatch(match)
     match.faceoffSerial = 0
     match.careerWaiting = match.careerEntryDelay and match.careerEntryDelay > 0
     for _, player in ipairs(match.squad) do
-        player.stats = newStats()
+        player.stats, player.screenCoachEvents = newStats(), {}
         player.faceoffFatigue = 0
     end
     match.ai = P.MatchAI.new()
@@ -240,6 +257,7 @@ function Match.new(scene, profile, homeId, awayId, rules)
     end
     P.MatchAI.registerAnimations()
     P.Defense.registerAnimations()
+    P.Screens.registerAnimations()
     P.Faceoff.registerAnimations(P.AnimationController)
     applyTeamKits(match, homeId, awayId)
     for team = 1, 2 do
@@ -273,18 +291,25 @@ function Match.new(scene, profile, homeId, awayId, rules)
             if player.role == "G" then match.keepers[team] = index end
         end
     end
+    match.screenStat = function(id,key,detail) screenStat(match,id,key,detail) end
+    match.screenCallbacks = {stat=match.screenStat,
+        foul=function(id,defender) screenFoul(match,id,defender) end}
     resetMatch(match)
     return match
 end
 
-local function startPass(match, player, target, mode)
-    local teammate = match.squad[target]
-    if player.id ~= match.carrier or match.pending or not teammate
-        or teammate.team ~= player.team or target == player.id then return end
-    if P.AnimationController.play(player.anim, "pass") then
-        match.pending = {kind="pass", from=player.id, to=target}
-        match.mode = mode or "SET"
+local function startPass(match, player, plan, mode)
+    if type(plan) == "number" then plan = P.Passing.forTarget(match,plan) end
+    if player.id ~= match.carrier or match.pending or not plan or not plan.point then return false end
+    if plan.from and plan.from ~= player.id then return false end
+    if plan.to then
+        local teammate = match.squad[plan.to]
+        if not teammate or teammate == player or teammate.team ~= player.team then return false end
     end
+    if not P.AnimationController.play(player.anim,"pass") then return false end
+    match.pending = {kind="pass",from=player.id,to=plan.to,point=plan.point,play=mode}
+    match.mode = mode or "SET"
+    return true
 end
 
 local function startShot(match, player, aim)
@@ -330,6 +355,57 @@ function Match.aimContext(match)
     return pocket(match.squad[match.controlled]), match.goalsByTeam[1]
 end
 
+function Match.passPreview(match, dx, dz)
+    if Match.canAim(match) then return P.Passing.select(match,match.carrier,dx,dz) end
+end
+
+local calls = {swing="SWING",clear="CLEAR",passdown="PASS DOWN",pickdown="PICK DOWN"}
+
+local function startPick(match, holder, screener)
+    local defender = P.Tactics.defender(match,holder.id)
+    if screener then
+        if screener == holder or screener.role == "G" then return false end
+        local mark = defender and match.squad[defender]
+        if not mark or distance(mark.x-screener.x,mark.z-screener.z) > 3.4 then
+            announce(match,"MOVE NEAR A DEFENDER")
+            return false
+        end
+        local screen = P.Screens.request(match,screener.id,holder.id,defender,
+            {x=screener.x,z=screener.z,manual=true})
+        if screen then announce(match,"SET YOUR FEET") end
+        return screen ~= nil
+    end
+
+    local detail = P.Tactics.pick(match,holder.id,defender)
+    if detail and P.Screens.request(match,detail.screener,holder.id,defender,detail) then
+        P.Tactics.activate(match,detail,"PICK DOWN",holder.team)
+        match.mode = "PICK DOWN"
+        announce(match,"PICK DOWN")
+        return true
+    end
+    announce(match,"NO SCREEN AVAILABLE")
+    return false
+end
+
+local function callTactic(match, holder, call)
+    if call == "PICK DOWN" then return startPick(match,holder) end
+    if match.pending or match.flight then return false end
+    local receiver, detail = P.Tactics.choose(match,holder.id,call)
+    if receiver and startPass(match,holder,receiver,call) then
+        P.Tactics.activate(match,detail,call,holder.team)
+        announce(match,call)
+        return true
+    end
+    if call == "CLEAR" then
+        match.mode, match.clearTime = "CLEAR", 3.5
+        P.Tactics.activate(match,{},"CLEAR",holder.team,3.5)
+        announce(match,"CLEAR · OUTLETS COVERED")
+    else
+        announce(match,call .. " · LANE COVERED")
+    end
+    return false
+end
+
 local function nextPlayer(match)
     local selected, closest = match.controlled, math.huge
     local ball = match.ball.position
@@ -364,9 +440,12 @@ function Match.command(match, action, moveX, moveZ, aim)
     local holder = match.carrier and match.squad[match.carrier]
     if action == "switch" then
         if not careerLock(match) then match.controlled = nextPlayer(match) end
-    elseif action == "clear" then
-        match.mode, match.clearTime = "CLEAR", 4.5
-        announce(match, "CLEAR THROUGH")
+    elseif calls[action] then
+        if holder and holder.team==1 then return callTactic(match,holder,calls[action]) end
+    elseif action == "setpick" then
+        if holder and holder.team==1 then return startPick(match,holder,player) end
+    elseif action == "releasepick" then
+        return P.Screens.endHold(match,player.id,moveX or 0,-(moveZ or 0))
     elseif action == "dodge" then
         if holder and holder.team ~= 1 then startCheck(match, player, "poke")
         else startDodge(player, moveX, moveZ) end
@@ -376,12 +455,14 @@ function Match.command(match, action, moveX, moveZ, aim)
         startScoop(match, player)
     elseif action == "shoot" then
         if holder == player then startShot(match, player, aim) end
-    elseif action == "pass" or action == "swing" then
+    elseif action == "pass" then
         if not holder or holder.team ~= 1 then return end
-        local target
-        if player.id ~= holder.id then target = player.id
-        else target = P.MatchAI.passTarget(match, holder.id, action == "swing") end
-        startPass(match, holder, target, action == "swing" and "SWING" or "SET")
+        if player ~= holder then
+            if not aim then return startPass(match,holder,player.id) end
+            return
+        end
+        local plan = aim or P.Passing.select(match,holder.id,moveX or 0,-(moveZ or 0))
+        return startPass(match,holder,plan)
     end
 end
 
@@ -430,32 +511,47 @@ end
 
 local function movePlayers(match, dt, moveX, moveZ, intents)
     local goal = match.goalsByTeam
+    local cut = P.Tactics.activeCut(match)
+    local movementIntents = {}
+    local input = distance(moveX,moveZ)
     for _, player in ipairs(match.squad) do
-        local intent = intents[player.id]
-        local vx, vz = 0, 0
-        if player.id == match.controlled and not match.careerWaiting then
-            local rate = match.sprinting and 1.18 or 1
-            local pace = 8.8 + ((player.attributes.speed or 62) - 62) * .034
-            vx, vz = moveX * pace * rate, -moveZ * pace * rate
-        elseif intent and intent.x and intent.z then
-            local dx, dz = intent.x - player.x, intent.z - player.z
-            local length = distance(dx, dz)
-            if length > .07 then
-                local speed = math.min(length * 3.2, intent.speed or (player.role == "G" and 4.8 or 7.2))
-                vx, vz = speed * dx / length, speed * dz / length
+        local intent = P.Screens.intent(match,player.id,intents[player.id] or {})
+        movementIntents[player.id] = intent
+        local human = player.id==match.controlled and not match.careerWaiting
+        local tx,tz = intent.x,intent.z
+        local receiveX,receiveZ = P.Passing.receiveTarget(match,player.id)
+        if not intent.screenControl then
+            if receiveX then
+                tx,tz = receiveX,receiveZ
+            elseif cut and cut.cutID==player.id and not match.pending then
+                tx,tz = cut.cutX,cut.cutZ
             end
         end
-        drive(match, player, vx, vz, dt)
+        local guided = receiveX or (cut and cut.cutID==player.id and not match.pending)
+        local vx,vz = 0,0
+        if human and not intent.screenControl and (not guided or input>.12) then
+            local rate = match.sprinting and 1.18 or 1
+            local pace = (8.8 + ((player.attributes.speed or 62) - 62) * .034) * (intent.screenDrag or 1)
+            vx,vz = moveX*pace*rate,-moveZ*pace*rate
+        elseif tx and tz then
+            local dx,dz = tx-player.x,tz-player.z
+            local gap = distance(dx,dz)
+            if gap > .045 then
+                local speed = math.min(gap*3.7, intent.speed or (player.role=="G" and 4.8 or 7.2))
+                vx,vz = speed*dx/gap,speed*dz/gap
+            end
+        end
+        drive(match,player,vx,vz,dt)
     end
 
     local ball = match.ball.position
     local flight = match.flight
     for _, player in ipairs(match.squad) do
         local lookX, lookZ = player.vx, player.vz
-        local intent = intents[player.id]
+        local intent = movementIntents[player.id]
         local pending = match.pending
         if pending and pending.from == player.id then
-            local target = pending.to and match.squad[pending.to] or goal[player.team]
+            local target = pending.to and match.squad[pending.to] or pending.point or goal[player.team]
             lookX, lookZ = target.x - player.x, target.z - player.z
         elseif match.scoopPlayer == player.id or
             flight and (flight.to == player.id and flight.catchStarted or
@@ -497,15 +593,11 @@ local function release(match, pending)
     local origin = pocket(player)
     local flight = {kind=pending.kind, from=pending.from, team=player.team, origin=origin, time=0}
     if flight.kind == "pass" then
-        local target = match.squad[pending.to]
-        local length = distance(target.x - player.x, target.z - player.z)
-        flight.to = target.id
-        local skill = player.role == "G" and player.attributes.clearingAccuracy or player.attributes.passing
-        local velocity = 23 + ((skill or 60) - 60) * .12
-        flight.duration = clamp(length / velocity, .35, 2.4)
-        flight.arc = clamp(length * .060, .18, 1.25)
-        Match.recordStat(match, player.id, "passes")
-        match.ballVelocity = (pocket(target) - origin) / flight.duration
+        local skill = player.role=="G" and player.attributes.clearingAccuracy or player.attributes.passing
+        local velocity = 23 + ((skill or 60)-60)*.12
+        flight = P.Passing.launch(match,pending,{speed=velocity,minDuration=.35})
+        Match.recordStat(match,player.id,"passes")
+        match.ballVelocity = flight.velocity
     else
         local goal = match.goalsByTeam[player.team]
         local x, y = aimPoint(match, pending, player)
@@ -519,6 +611,7 @@ local function release(match, pending)
         flight.onTarget = math.abs(x - goal.x) < goal.halfWidth - ballRadius
             and y >= ballRadius and y < goal.top - ballRadius
         Match.recordStat(match, player.id, "shots")
+        P.Screens.creditShot(match,player.id,match.screenStat,flight)
         match.ballVelocity = flight.velocity
     end
     match.lastTouch, match.carrier = player.team, nil
@@ -526,15 +619,18 @@ local function release(match, pending)
     match.ball.position = origin
 end
 
-local function planCatch(match, dt)
-    local flight = match.flight
-    if not flight or not flight.to or flight.catchStarted then return end
-    local connect = P.AnimationController.clips.catch.eventTime
-    local remaining = flight.duration - flight.time
-    if remaining <= connect + dt then
-        flight.catchStarted = P.AnimationController.play(match.squad[flight.to].anim,
-            "catch", connect / math.max(dt, remaining))
-    end
+screenFoul = function(match, screenerID, defenderID)
+    if match.phase~="LIVE" then return end
+    local holder = match.carrier
+    if holder then Match.recordStat(match,holder,"turnovers") end
+    Match.recordStat(match,screenerID,"fouls")
+    match.pending,match.flight,match.loose,match.scoopPlayer = nil,nil,nil,nil
+    match.assist,match.tactical,match.cut = nil,nil,nil
+    match.mode = "SET"
+    match.foul = {recipient=defenderID,oldHolder=holder}
+    match.phase,match.phaseTime = "FOUL",0
+    match.ballVelocity = vec3()
+    announce(match,"ILLEGAL SCREEN",match.rules.foulTime)
 end
 
 local function completeCheck(match, player)
@@ -570,7 +666,11 @@ local function act(match, intents)
             or (intent.action == "save" and index == match.careerPlayer) then
             local player = match.squad[index]
             local action = intent.action
-            if action == "pass" then startPass(match, player, intent.target)
+            if action == "pass" then
+                local call = intent.tactic and intent.tactic.call
+                if startPass(match,player,intent.target,call) and call then
+                    P.Tactics.activate(match,intent.tactic,call,player.team)
+                end
             elseif action == "shoot" then startShot(match, player, intent.aim)
             elseif action == "dodge" then startDodge(player, intent.moveX, intent.moveZ)
             elseif action == "check" or P.Defense.checks[action] then
@@ -612,6 +712,8 @@ local function score(match, flight, hit)
     Match.recordStat(match, flight.from, "goals")
     Match.recordStat(match, flight.from, "shotsOnGoal")
     Match.recordStat(match, flight.from, "score")
+    P.Screens.creditGoal(match,flight.from,match.screenStat,flight)
+    P.Screens.reset(match)
     local assist = match.assist
     if assist and assist.to == flight.from and match.elapsed-assist.at <= 8 then
         Match.recordStat(match, assist.from, "assists")
@@ -643,13 +745,15 @@ local function updateFlight(match, dt, catchIndex)
             Match.recordStat(match, intercepted, "forcedTurnovers")
             Match.recordStat(match, flight.from, "turnovers")
             announce(match, "INTERCEPTION")
-        elseif catchIndex == flight.to then
+        elseif P.Passing.canCatch(match,flight,catchIndex,position) then
             attach(match, flight.to, match.controlled == flight.from)
             Match.recordStat(match, flight.from, "completions")
             match.assist = {from=flight.from,to=flight.to,at=match.elapsed}
         elseif progress >= 1 then
-            freeBall(match, position, vec3(0, -.6, 0), flight.team)
-            announce(match, "PASS DROPPED")
+            local velocity = P.Passing.endVelocity(match,flight)
+            if not flight.to then position.y = ballRadius end
+            freeBall(match, position, velocity, flight.team)
+            announce(match,flight.to and "PASS DROPPED" or "BALL LOOSE")
         end
         return
     end
@@ -744,6 +848,7 @@ local function settlePossession(match, dt, flight, loose, catchIndex, scoopIndex
 end
 
 local function finishPeriod(match)
+    P.Screens.reset(match)
     match.phaseTime = 0
     if match.period >= match.rules.periods then
         match.phase = "FINAL"
@@ -856,17 +961,20 @@ local function live(match, dt, moveX, moveZ)
     local intents = P.MatchAI.update(match, dt)
     pursueDraw(match, intents, dt)
     act(match, intents)
-    planCatch(match, dt)
+    P.Passing.scheduleCatch(match,match.flight,dt)
     if match.flight then P.Defense.prepareIntercept(match, match.flight) end
     if match.loose and not match.careerWaiting then startScoop(match, match.squad[match.controlled]) end
     movePlayers(match, dt, moveX, moveZ, intents)
+    P.Screens.update(match,dt,match.screenCallbacks)
+    if match.phase~="LIVE" then return end
     local animation = P.AnimationController
     local flight, loose = match.flight, match.loose
     local catchIndex, scoopIndex
     for index, player in ipairs(match.squad) do
         local event = animation.update(player.anim, dt, {
             speed=player.speed, turn=player.turn, possessed=match.carrier==index,
-            scoopPoint=match.scoopPlayer==index and match.ball.position or nil
+            scoopPoint=match.scoopPlayer==index and match.ball.position or nil,
+            catchPoint=P.Passing.catchPoint(match,index)
         })
         if player.check then
             if event == "check" then completeCheck(match, player)
