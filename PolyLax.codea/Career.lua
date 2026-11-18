@@ -215,6 +215,9 @@ function Career.record(career, fixture, match)
     if not P.CareerSeason.record(nextSave,fixture,match,earned,personal,screenEvents,box) then
         return false, "This result does not match the scheduled game"
     end
+    local trophies=#P.Awards.trophies(nextSave)
+    P.Awards.finalize(nextSave)
+    nextSave.xp=nextSave.xp+30*(#P.Awards.trophies(nextSave)-trophies)
     nextSave.entries[fixture.id] = {home=match.homeScore, away=match.awayScore,
         opponent=fixture.opponent, stats=personal, screenCoachEvents=screenEvents}
     if not Career.save(nextSave) then return false, "Save unavailable" end

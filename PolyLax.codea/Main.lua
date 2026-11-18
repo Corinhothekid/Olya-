@@ -201,7 +201,7 @@ end
 
 local function careerLayout()
     return P.CareerUI.layout(state.career, state.careerView, state.careerPlay,
-        state.careerSkill, state.careerPage,state.careerStatMode)
+        state.careerSkill,state.careerPage,state.careerStatMode,state.awardState)
 end
 
 local function openDevelopment()
@@ -301,6 +301,7 @@ local function careerTouch(touch)
             return
         end
     end
+    if hud.awards and P.AwardUI.touch(hud.awards,state.awardState,touch) then return end
     for _,button in ipairs(hud.statModes or {}) do
         if hit(button) then
             state.careerStatMode,state.careerPage=button.id,1
@@ -476,7 +477,7 @@ function setup()
     end
     local profile = P.Profile.load()
     state = {profile=profile, uniform=P.TeamUniform.fromProfile(profile),
-        categoryIndex=4, career=P.Career.load()}
+        categoryIndex=4,career=P.Career.load(),awardState={}}
     openMenu("FRONT")
 end
 
@@ -847,7 +848,7 @@ function setup()
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League"
+            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

@@ -19,6 +19,7 @@ local tabs = {
     {id="schedule",label="Schedule"},
     {id="standings",label="Standings"},
     {id="stats",label="Stats"},
+    {id="awards",label="Awards"},
     {id="offers",label="Offers"}
 }
 
@@ -137,7 +138,7 @@ local function report(career,kind)
     return entries
 end
 
-function UI.layout(career, view, playing, trainIndex, page, statMode)
+function UI.layout(career, view, playing, trainIndex, page, statMode, awardState)
     view = view or "profile"
     local safe = P.UI.safeArea()
     local width = math.min(480,WIDTH-safe.left-safe.right-28)
@@ -171,6 +172,9 @@ function UI.layout(career, view, playing, trainIndex, page, statMode)
         listLayout(l,season and season.schedule(career) or {},page,37)
     elseif view == "standings" then
         listLayout(l,season and season.standings(career) or {},page,34)
+    elseif view=="awards" then
+        local area={left=left,right=right,top=l.contentTop,bottom=l.bottom+78}
+        l.awards=P.AwardUI.layout(career,area,awardState)
     elseif view=="stats" then
         l.statMode=statMode or "career"
         l.statModes={}
@@ -382,6 +386,7 @@ function UI.draw(career,l,playing,editing,draft,message)
 
     if l.view == "schedule" then drawSchedule(l)
     elseif l.view == "standings" then drawStandings(career,l)
+    elseif l.view=="awards" then P.AwardUI.draw(l.awards)
     elseif l.view=="stats" then drawStats(l)
     elseif l.view == "offers" then drawOffers(l,playing)
     else drawOverview(career,l,editing,draft,playing) end

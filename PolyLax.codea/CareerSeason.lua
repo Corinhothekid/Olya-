@@ -418,13 +418,14 @@ function Season.offers(career)
 end
 
 local function nextSeason(career, candidate, stage, team)
-    local data = state(candidate)
+    local data=state(candidate)
+    P.Awards.finalize(candidate)
     candidate.history = candidate.history or {}
     candidate.history[#candidate.history+1] = {season=candidate.season, stage=candidate.stage,
         team=candidate.team, wins=data.wins, losses=data.losses, ties=data.ties,
         stats=data.personal, screenCoachCounts=data.screenCoachCounts, title=data.titleWon,
         champion=data.champion, competition=Season.competition(candidate).id, boxScores=data.gameBoxes,
-        standings=ranked(data)}
+        standings=ranked(data),awards=data.awards}
     candidate.stage, candidate.team = stage, team
     candidate.season, candidate.seasonData = candidate.season+1, nil
     return commit(career,candidate)
