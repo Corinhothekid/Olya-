@@ -7,7 +7,7 @@ local tests = arg and arg[0] and arg[0]:match("^(.*[/])")
 dofile(tests.."craft_mock.lua")
 
 local tabs = {"SchoolTeams","TeamUniform","Profile","Character","AnimationController",
-    "GoalPhysics","Attributes","Passing","Tactics","Screens","Field","League","Statistics","Defense","MatchAI","Faceoff","FullMatch"}
+    "GoalPhysics","Attributes","Passing","Tactics","Screens","Field","League","Statistics","Defense","Midfield","MatchAI","Faceoff","FullMatch"}
 for _, name in ipairs(tabs) do dofile(project.."/"..name..".lua") end
 
 local P=PolyLax

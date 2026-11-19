@@ -1,4 +1,4 @@
--- PolyLax Build 013 | MatchAI
+-- PolyLax 2.0.3 | MatchAI
 PolyLax = PolyLax or {}
 local P = PolyLax
 local AI = {}
@@ -34,6 +34,36 @@ end
 
 local function goalHeight(goal)
     return goal.height or goal.top or goal.crossbar or 1.83
+end
+
+local function midfielder(player)
+    return player.role == "M" or player.role == "LSM" or player.role == "SSDM"
+end
+
+local function attackingSign(match, team)
+    local goal = match.goalsByTeam[team]
+    return goal.attackSign or (goal.z < 0 and -1 or 1)
+end
+
+local function acrossMidfield(match, player, sign)
+    local z = player.z * sign
+    if math.abs(z) > .0001 then return z > 0 end
+    local side = P.Midfield and P.Midfield.side and P.Midfield.side(match,player)
+    if side == "offense" or side == "OFFENSE" then return true end
+    if side == "defense" or side == "DEFENSE" then return false end
+    if type(side) == "number" then return side * sign > 0 end
+    if type(side) == "boolean" then return side end
+    return (player.homeZ or 0) * sign > 0
+end
+
+local function numbers(match,team,sign)
+    if P.Midfield and P.Midfield.counts then return P.Midfield.counts(match,team) end
+    local attack, defense = 0, 0
+    for _, id in ipairs(match.teams[team]) do
+        if acrossMidfield(match,match.squad[id],sign) then attack = attack + 1
+        else defense = defense + 1 end
+    end
+    return {offense=attack,defense=defense}
 end
 
 function AI.new()
@@ -130,10 +160,6 @@ local function moveKeeper(match, keeper, intent, ball, sightTime)
     intent.speed = 2.7+footwork*(sightTime and 4.1 or 2.5)
 end
 
-local function teamSlot(player)
-    return player.slot or (player.id - 1) % 10 + 1
-end
-
 local function useScreen(match, ai, tactic, carrier, defender, pressure, depth, goal, intent)
     local screens = P.Screens
     if not screens then return false end
@@ -202,6 +228,16 @@ local function tacticalPass(match, tactic, carrierID, pressure, depth, now)
     return target, detail
 end
 
+local function midfieldOutlet(slot,ball,progress)
+    local firstWing = ball.x < 0 and 4 or 5
+    local order = slot == firstWing and 1 or slot == 6 and 3 or 2
+    local leaders = progress >= -1 and 3 or progress > -11 and 2 or progress > -24 and 1 or 0
+    if order <= leaders then return nil, 2.8 + order * 1.4 end
+    local width = slot == 4 and -12.4 or slot == 5 and 12.4 or ball.x * .22
+    local depth = clamp(-progress * (.18 + order * .10) + order,3.6,22)
+    return width, -depth
+end
+
 local function offBallAttack(match, ai, snapshot, team)
     local goal = match.goalsByTeam[team]
     local cx = goalX(goal)
@@ -215,13 +251,17 @@ local function offBallAttack(match, ai, snapshot, team)
     local cut = P.Tactics.activeCut(match)
     local carrierID = match.carrier
     local carrier = carrierID and match.squad[carrierID]
+    local sign = attackingSign(match,team)
+    local progress = (carrier and carrier.z or ball.z) * sign
+    local attackSlot, midSlot = 0, 3
     for _, identifier in ipairs(match.teams[team]) do
         local player = match.squad[identifier]
         local intent = ai.intents[identifier]
-        local slot = teamSlot(player)
         if player.role == "G" then
             moveKeeper(match, player, intent, ball)
-        elseif slot <= 6 then
+        elseif player.role == "A" or midfielder(player) then
+            if player.role == "A" then attackSlot = attackSlot + 1 else midSlot = midSlot + 1 end
+            local slot = player.role == "A" and math.min(attackSlot,3) or math.min(midSlot,6)
             local x, z = sides[slot], depths[slot] + advance
             if match.mode == "CLEAR" and advance < 2 then
                 if slot < 3 then x, z = x * 1.46, 2 end
@@ -234,14 +274,24 @@ local function offBallAttack(match, ai, snapshot, team)
             if tactic.cut == identifier and advance < 3 and slot ~= 3 then
                 x, z = -ball.x * .10, 6.1
             end
-            move(intent, cx + x, goal.z + z * inside)
+            local fieldX, fieldZ = cx+x, (goal.z+z*inside)*sign
+            if player.role == "A" then
+                fieldZ = math.max(fieldZ, slot == 3 and 13 or 6.0)
+            else
+                local outlet, depth = midfieldOutlet(slot,ball,progress)
+                if outlet then fieldX,fieldZ = cx+outlet,depth
+                else fieldZ = math.max(fieldZ,depth) end
+            end
+            move(intent, fieldX, fieldZ*sign)
             intent.lookX, intent.lookZ = ball.x, ball.z
-            intent.role = tactic.cut == identifier and "CUT" or advance > 8 and "TRANSITION" or "2-3-1"
+            intent.role = fieldZ < 0 and "MIDFIELD OUTLET" or tactic.cut == identifier and "CUT"
+                or advance > 8 and "TRANSITION" or "2-3-1"
         else
             local ownGoal = match.goalsByTeam[3 - team]
             local depthFromOwn = (ball.z - ownGoal.z) * -inside
             local reserve = clamp(depthFromOwn * .42 + 7, 8, 34)
-            move(intent, player.homeX + ball.x*.08, ownGoal.z - reserve * inside)
+            local z = math.min(-2.4,(ownGoal.z-reserve*inside)*sign)
+            move(intent, player.homeX + ball.x*.08, z*sign)
             intent.lookX, intent.lookZ = ball.x, ball.z
             intent.role = "RELEASE SUPPORT"
         end
@@ -341,7 +391,7 @@ local function chooseMatchups(match, ai, team, ownGoal, carrier)
     local gx = goalX(ownGoal)
     for _, identifier in ipairs(match.teams[team]) do
         local player = match.squad[identifier]
-        if player.role == "D" or player.role == "M" then
+        if player.role == "D" or midfielder(player) then
             local best, score = nil, math.huge
             for _, otherID in ipairs(opposition) do
                 local other = match.squad[otherID]
@@ -349,7 +399,7 @@ local function chooseMatchups(match, ai, team, ownGoal, carrier)
                     local candidate = planDistance(player.x, player.z, other.x, other.z)
                         + planDistance(other.x, other.z, gx, ownGoal.z)*.16
                     if tactic.mark[identifier] == otherID then candidate = candidate - 2 end
-                    if player.role == "D" and other.role == "M" then candidate = candidate + 2.8 end
+                    if player.role == "D" and midfielder(other) then candidate = candidate + 2.8 end
                     if candidate < score then best, score = otherID, candidate end
                 end
             end
@@ -504,11 +554,26 @@ local function defend(match, ai, snapshot, team)
     local ball = snapshot.ball
     local carrierID = match.carrier
     local carrier = carrierID and match.squad[carrierID]
+    local sign = attackingSign(match,team)
+    local inRide = (carrier and carrier.z or ball.z)*sign > 2
     local tactic = chooseMatchups(match, ai, team, goal, carrier)
     local switching = defendScreen(match, ai, tactic, team, carrier)
     coordinateSlide(match, tactic, goal, carrier)
     local onBall = tactic.firstSlide or tactic.primary
     local inside = goal.z < 0 and 1 or -1
+    if inRide then
+        onBall = nil
+        if carrier then
+            local best = math.huge
+            for _, id in ipairs(match.teams[team]) do
+                local player = match.squad[id]
+                if player.role == "A" and (id ~= match.controlled or match.careerWaiting) then
+                    local gap = distanceSquared(player.x,player.z,carrier.x,carrier.z)
+                    if gap < best then onBall,best=id,gap end
+                end
+            end
+        end
+    end
 
     for _, identifier in ipairs(match.teams[team]) do
         local player = match.squad[identifier]
@@ -519,9 +584,12 @@ local function defend(match, ai, snapshot, team)
         elseif carrier and identifier == onBall then
             local fx, fz = unit(gx-carrier.x, goal.z-carrier.z, -inside)
             local spacing = identifier == tactic.firstSlide and 1.48 or 1.26
-            move(intent, carrier.x + fx*spacing, carrier.z + fz*spacing)
+            local z = carrier.z+fz*spacing
+            if inRide then z = math.max(1.25,z*sign)*sign
+            else z = math.min(-1.25,z*sign)*sign end
+            move(intent, carrier.x + fx*spacing,z)
             intent.lookX, intent.lookZ = carrier.x, carrier.z
-            intent.role = identifier == tactic.firstSlide and "FIRST SLIDE"
+            intent.role = inRide and "RIDE PRESSURE" or identifier == tactic.firstSlide and "FIRST SLIDE"
                 or switching and "SCREEN SWITCH" or "BALL PRESSURE"
             local gap = planDistance(player.x, player.z, carrier.x, carrier.z)
             intent.speed = gap < 3.4 and 4.4 or 7.2
@@ -532,6 +600,17 @@ local function defend(match, ai, snapshot, team)
                     tactic.nextCheck = ai.elapsed + .72
                 end
             end
+        elseif player.role == "A" then
+            local depth = clamp(ball.z*sign+12,6,math.max(7,math.abs(player.homeZ)-3))
+            move(intent, player.homeX + ball.x*.16, depth*sign)
+            intent.lookX,intent.lookZ = ball.x,ball.z
+            intent.role = inRide and "RIDE SUPPORT" or "HIGH OUTLET"
+        elseif inRide then
+            local depth = midfielder(player) and -clamp(math.abs(player.homeX)*.21+3,3,8)
+                or -math.max(10,math.abs(player.homeZ)*.68)
+            move(intent, player.homeX + ball.x*.12,depth*sign)
+            intent.lookX,intent.lookZ = ball.x,ball.z
+            intent.role = midfielder(player) and "MIDFIELD RECOVERY" or "DEFENSIVE SHAPE"
         elseif mark then
             if identifier == tactic.secondSlide then mark = tactic.mark[tactic.firstSlide] end
             if identifier == tactic.primary and tactic.firstSlide and tactic.secondSlide then
@@ -550,12 +629,12 @@ local function defend(match, ai, snapshot, team)
                 intent.role = identifier == tactic.secondSlide and "SECOND SLIDE"
                     or identifier == tactic.primary and "RECOVER" or "MATCHUP"
             end
-            move(intent, x, z)
+            move(intent, x, math.min(-1.5,z*sign)*sign)
             intent.lookX, intent.lookZ = ball.x, ball.z
             routeAroundScreen(match.screen, player, intent, goal)
         else
             local support = clamp((ball.z-goal.z)*inside + 9, 32, match.field.halfLength*1.48)
-            move(intent, player.homeX + ball.x*.13, goal.z + support*inside)
+            move(intent, player.homeX + ball.x*.13, math.min(-1.5,(goal.z+support*inside)*sign)*sign)
             intent.lookX, intent.lookZ = ball.x, ball.z
             intent.role = "RIDE"
         end
@@ -566,6 +645,9 @@ local function assignLoose(match, ai, snapshot, team)
     local ball = snapshot.ball
     local velocity = snapshot.velocity or vec3()
     local x, z = ball.x + velocity.x*.16, ball.z + velocity.z*.16
+    local sign = attackingSign(match,team)
+    local limits = numbers(match,team,sign)
+    local onAttack = z*sign > 0
     local best, second, d1, d2 = nil, nil, math.huge, math.huge
     for _, identifier in ipairs(match.teams[team]) do
         local player = match.squad[identifier]
@@ -573,6 +655,10 @@ local function assignLoose(match, ai, snapshot, team)
         if player.role == "G" then
             local ownGoal = match.goalsByTeam[3 - team]
             if distanceSquared(goalX(ownGoal), ownGoal.z, x, z) > 6.4 then distance = math.huge end
+        end
+        if math.abs(z) > .65 and acrossMidfield(match,player,sign) ~= onAttack
+            and (onAttack and limits.offense >= 6 or not onAttack and limits.defense >= 7) then
+            distance = math.huge
         end
         if distance < d1 then
             second, d2 = best, d1
@@ -598,6 +684,129 @@ local function assignLoose(match, ai, snapshot, team)
         local intent = ai.intents[second]
         move(intent, x + sx*3, z + sz*3)
         intent.role = "GROUND COVER"
+    end
+end
+
+local function requestCrossing(match,ai,team,sign)
+    local human = not match.careerWaiting and match.squad[match.controlled]
+    if human and human.team == team and math.abs(human.z) <= 10 then
+        local advance = -(match.moveZ or 0)*sign
+        if math.abs(advance) < .14 then advance = (human.vz or 0)*sign*.16 end
+        if math.abs(advance) >= .14 and (advance > 0) ~= acrossMidfield(match,human,sign) then
+            return human,advance > 0
+        end
+    end
+    local carrier = match.carrier and match.squad[match.carrier]
+    if carrier and carrier ~= human and carrier.team == team and carrier.role ~= "G"
+        and math.abs(carrier.z) <= 9 then
+        local target = ai.intents[carrier.id].z*sign
+        if math.abs(target) > .65 and (target > 0) ~= acrossMidfield(match,carrier,sign) then
+            return carrier,target > 0
+        end
+    end
+end
+
+local function exchangeAtMidfield(match,ai,snapshot,team,sign)
+    local tactic = ai.tactics[team]
+    local exchange = tactic.exchange
+    local mover,toAttack = requestCrossing(match,ai,team,sign)
+    if exchange then
+        local player = match.squad[exchange.mover]
+        if acrossMidfield(match,player,sign) == exchange.toAttack then
+            exchange = nil
+        elseif mover and mover.id == exchange.mover and toAttack == exchange.toAttack then
+            exchange.untilTime = ai.elapsed + .55
+        elseif ai.elapsed >= exchange.untilTime then
+            exchange = nil
+        end
+    end
+    if not exchange and mover then
+        local count = numbers(match,team,sign)
+        if toAttack and count.offense >= 6 or not toAttack and count.defense >= 7 then
+            local best,bestCost
+            for _, id in ipairs(match.teams[team]) do
+                local player = match.squad[id]
+                local screen = match.screen
+                if id ~= mover.id and id ~= match.carrier and player.role ~= "G"
+                    and (id ~= match.controlled or match.careerWaiting)
+                    and acrossMidfield(match,player,sign) == toAttack
+                    and not (screen and (screen.screener == id or screen.user == id)) then
+                    local cost = math.abs(player.z) + math.abs(player.x-mover.x)*.13
+                    if not midfielder(player) then
+                        cost = cost + ((toAttack and player.role == "A"
+                            or not toAttack and player.role == "D") and 44 or 25)
+                    end
+                    if not bestCost or cost < bestCost then best,bestCost=id,cost end
+                end
+            end
+            if best then
+                exchange = {mover=mover.id,reserve=best,toAttack=toAttack,untilTime=ai.elapsed+.55}
+            end
+        end
+    end
+    tactic.exchange = exchange
+    return exchange
+end
+
+local function balanceMidfield(match,ai,snapshot,team)
+    local sign = attackingSign(match,team)
+    local exchange = exchangeAtMidfield(match,ai,snapshot,team,sign)
+    local midfielders,nonMidAttack,wanted = {},0,0
+    local humanID = not match.careerWaiting and match.controlled
+    for _, id in ipairs(match.teams[team]) do
+        local player,intent = match.squad[id],ai.intents[id]
+        local attacking = acrossMidfield(match,player,sign)
+        if midfielder(player) then
+            local desire = intent.z*sign > 0
+            if id == humanID or id == match.carrier then
+                desire = attacking
+            end
+            if exchange and id == exchange.mover then desire = exchange.toAttack
+            elseif exchange and id == exchange.reserve then desire = not exchange.toAttack end
+            if desire then wanted = wanted + 1 end
+            local priority = (desire and 100 or 0) + (attacking and 6 or 0) - math.abs(player.z)*.27
+            if id == humanID or id == match.carrier then priority = priority + (desire and 180 or -180) end
+            if exchange and id == exchange.reserve then priority = priority + (desire and 400 or -400) end
+            midfielders[#midfielders+1] = {id=id,priority=priority}
+        elseif attacking then
+            nonMidAttack = nonMidAttack + 1
+        end
+    end
+    local duringExchange = nonMidAttack
+    if exchange then
+        local mover = match.squad[exchange.mover]
+        local reserve = match.squad[exchange.reserve]
+        if exchange.toAttack and not midfielder(mover) then duringExchange = duringExchange + 1 end
+        if not exchange.toAttack and not midfielder(reserve)
+            and not acrossMidfield(match,reserve,sign) then duringExchange = duringExchange + 1 end
+    end
+    local maximum = clamp(6-duringExchange,0,#midfielders)
+    local minimum = clamp(3-nonMidAttack,0,maximum)
+    local selected = clamp(wanted,minimum,maximum)
+    table.sort(midfielders,function(a,b)
+        return a.priority == b.priority and a.id < b.id or a.priority > b.priority
+    end)
+    for rank, entry in ipairs(midfielders) do
+        local id = entry.id
+        local player,intent = match.squad[id],ai.intents[id]
+        local front = rank <= selected
+        if id ~= match.carrier and id ~= humanID and (intent.z*sign > 0) ~= front then
+            local depth = front and (3.3+rank*1.3) or -(3.6+rank*.8)
+            local width = math.abs(player.homeX) > 1 and player.homeX*.78 or snapshot.ball.x*.35
+            move(intent,width,depth*sign)
+            intent.speed = 6.4
+            intent.role = front and "MIDFIELD REPLACEMENT" or "MIDFIELD COVER"
+            intent.action,intent.target = nil,nil
+        end
+    end
+    if exchange then
+        local reserve = match.squad[exchange.reserve]
+        local intent = ai.intents[reserve.id]
+        local depth = exchange.toAttack and -2.8 or 2.8
+        move(intent,reserve.x,depth*sign)
+        intent.speed,intent.role = 7.8,"MIDFIELD EXCHANGE"
+        intent.lookX,intent.lookZ = snapshot.ball.x,snapshot.ball.z
+        intent.action,intent.target = nil,nil
     end
 end
 
@@ -791,6 +1000,8 @@ function AI.update(match, dt)
         elseif snapshot.possessionTeam then
             keepOutlet(match, ai)
         end
+        balanceMidfield(match,ai,snapshot,1)
+        balanceMidfield(match,ai,snapshot,2)
         for _, intent in ipairs(ai.intents) do restrict(match, intent) end
     end
     watchShot(match, ai)

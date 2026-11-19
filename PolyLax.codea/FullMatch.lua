@@ -201,6 +201,7 @@ local function startFaceoff(match)
         place(player)
         reset(player.anim)
     end
+    P.Midfield.reset(match)
     match.ball.position, match.ballVelocity = vec3(0, ballRadius, 0), vec3()
     for _, goal in ipairs(match.goalsByTeam) do P.GoalPhysics.reset(goal) end
     match.marker.position = match.squad[match.controlled].rig.root.position
@@ -259,6 +260,7 @@ function Match.new(scene, profile, homeId, awayId, rules)
         ball=makeBall(scene), marker=makeMarker(scene), squad={}, teams={{},{}}, keepers={}, rules=matchRules(rules)
     }
     match.statisticsOptions = rules.statistics
+    match.movementProposals = {}
     local slot = rules and tonumber(rules.careerPlayerSlot)
     if slot then
         match.careerPlayer = clamp(math.floor(slot), 1, 10)
@@ -296,6 +298,7 @@ function Match.new(scene, profile, homeId, awayId, rules)
                 end
             end
             match.squad[index] = player
+            match.movementProposals[index] = {}
             match.teams[team][slot] = index
             if player.role == "G" then match.keepers[team] = index end
         end
@@ -477,7 +480,7 @@ function Match.command(match, action, moveX, moveZ, aim)
     end
 end
 
-local function drive(match, player, vx, vz, dt)
+local function proposeMovement(match, player, vx, vz, dt, proposal)
     local dodge = player.dodge
     local acceleration = 24+(P.Attributes.rating(player,"acceleration",60)-60)*.18
     local exit = player.faceoffExit
@@ -511,8 +514,12 @@ local function drive(match, player, vx, vz, dt)
             targetX, targetZ = goal.x + crease * gx / length, goal.z + crease * gz / length
         end
     end
-    player.x, player.z = targetX, targetZ
-    player.vx, player.vz = (targetX - x) / dt, (targetZ - z) / dt
+    proposal.x, proposal.z, proposal.intentZ = targetX, targetZ, vz
+end
+
+local function applyMovement(player, proposal, dt)
+    player.vx, player.vz = (proposal.x - player.x) / dt, (proposal.z - player.z) / dt
+    player.x, player.z = proposal.x, proposal.z
     player.speed = distance(player.vx, player.vz)
     P.Attributes.updateFatigue(player,dt)
     if player.slot == 4 then
@@ -525,11 +532,13 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
     local goal = match.goalsByTeam
     local cut = P.Tactics.activeCut(match)
     local movementIntents = {}
+    local proposals = match.movementProposals
+    local humanID = not match.careerWaiting and match.controlled
     local input = distance(moveX,moveZ)
     for _, player in ipairs(match.squad) do
         local intent = P.Screens.intent(match,player.id,intents[player.id] or {})
         movementIntents[player.id] = intent
-        local human = player.id==match.controlled and not match.careerWaiting
+        local human = player.id==humanID
         local tx,tz = intent.x,intent.z
         local receiveX,receiveZ = P.Passing.receiveTarget(match,player.id)
         if not intent.screenControl then
@@ -554,7 +563,14 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
                 vx,vz = speed*dx/gap,speed*dz/gap
             end
         end
-        drive(match,player,vx,vz,dt)
+        proposeMovement(match,player,vx,vz,dt,proposals[player.id])
+    end
+
+    -- Apply both teams' steps together so a legal midfield exchange does not
+    -- depend on the order of players in the squad.
+    P.Midfield.resolve(match, proposals, humanID, dt)
+    for _, player in ipairs(match.squad) do
+        applyMovement(player, proposals[player.id], dt)
     end
 
     local ball = match.ball.position
@@ -832,15 +848,24 @@ local function outOfBounds(match, position)
     local field = match.field
     local team = 3 - (match.lastTouch or 2)
     local selected, best = nil, math.huge
+    local fallback, fallbackDistance = nil, math.huge
     local x = clamp(position.x, -field.halfWidth + .9, field.halfWidth - .9)
     local z = clamp(position.z, -field.halfLength + .9, field.halfLength - .9)
+    local half = P.Midfield.halfAt(match, team, z)
     for _, index in ipairs(match.teams[team]) do
         local player = match.squad[index]
-        if player.role ~= "G" then
+        if player.role ~= "G" and player.onField ~= false and player.active ~= false and not player.bench then
             local length = distance(player.x - x, player.z - z)
-            if length < best then selected, best = player, length end
+            if not half or P.Midfield.side(match, player) == half then
+                if length < best then selected, best = player, length end
+            elseif length < fallbackDistance then
+                fallback, fallbackDistance = player, length
+            end
         end
     end
+    -- Restart at the same depth if an incomplete lineup has no one in this half.
+    if not selected and fallback then selected, z = fallback, fallback.z end
+    if not selected then return end
     selected.x, selected.z, selected.vx, selected.vz = x, z, 0, 0
     place(selected)
     P.AnimationController.reset(selected.anim)

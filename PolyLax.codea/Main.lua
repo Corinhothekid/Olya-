@@ -94,7 +94,7 @@ end
 
 local function beginPresentation(play,kind,options)
     options=options or {}
-    options.frame=P.UI.practiceLayout().frame
+    options.frame=P.UI.practiceLayout(play.game.positioning ~= nil).frame
     return P.Presentation.start(play,kind,options)
 end
 
@@ -472,9 +472,10 @@ end
 local function currentHUDLayout()
     if not state.layout or state.width ~= WIDTH or state.height ~= HEIGHT then
         state.width, state.height = WIDTH, HEIGHT
+        local play = state.page ~= "CREATOR" and activePlay()
         state.layout = state.page == "CREATOR" and
             P.UI.creatorLayout(creatorCategories(), {athlete=state.careerCreator,kit=state.careerKit})
-            or P.UI.practiceLayout()
+            or P.UI.practiceLayout(play and play.game.positioning ~= nil)
     end
     return state.layout
 end
@@ -907,7 +908,7 @@ function setup()
         local missing = {}
         for _, name in ipairs({
             "Profile", "TeamUniform", "Character", "AnimationController",
-            "CameraController", "GoalPhysics", "Gameplay", "Field", "MatchAI", "FullMatch",
+            "CameraController", "GoalPhysics", "Gameplay", "Field", "Midfield", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
             "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation"
         }) do

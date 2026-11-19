@@ -128,8 +128,14 @@ local function createMarkings(scene, field)
         crease(lines, goal, field.creaseRadius, width, y)
         lineX(lines, -field.goalHalfWidth, field.goalHalfWidth, goal, width, y)
     end
-    lineX(lines, -x, x, 0, width, y)
-    rectangle(square, -.0508, .0508, -.0508, .0508, y + .001)
+    -- A brighter silhouette at midfield remains legible in Broadcast view.
+    -- Split the paint at the contrasting faceoff mark so the surfaces never fight.
+    local midfield, middleWidth, spot = field.midfieldZ, .22, .0508
+    lineX(lines, -x, -spot, midfield, middleWidth, y)
+    lineX(lines, spot, x, midfield, middleWidth, y)
+    rectangle(square, -spot, spot, midfield - spot, midfield + spot, y)
+    lineX(square, -x - .72, -x - .14, midfield, .28, -.014)
+    lineX(square, x + .14, x + .72, midfield, .28, -.014)
     -- Dashed outside paint defines the sideline buffer and bench strip.
     local sidelineBuffer = x + 6 * yard
     local interval = 2.5 * yard
@@ -231,6 +237,7 @@ function Field.new(scene, theme, metrics)
     local field = {
         halfWidth = (metrics.fieldWidthYards or 60) * yard * .5,
         halfLength = halfLength,
+        midfieldZ = 0,
         goalZ = halfLength - (metrics.goalFromEndlineYards or 15) * yard,
         restrainingZ = (metrics.restrainingFromMidfieldYards or 20) * yard,
         wingX = (metrics.wingFromCenterYards or 20) * yard,

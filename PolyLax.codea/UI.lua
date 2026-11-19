@@ -221,7 +221,7 @@ function UI.step(layout, dt)
     end
 end
 
-function UI.practiceLayout()
+function UI.practiceLayout(showPositioning)
     local safe = UI.safeArea()
     local left, right = safe.left+12, WIDTH-safe.right-12
     local width, header = right-left, HEIGHT-safe.top
@@ -244,7 +244,7 @@ function UI.practiceLayout()
     local layout = {
         panelHeight=panelHeight, headerY=header, leftX=left, rightX=right,
         centerX=(left+right)*.5, width=width, footer=footer, touches={}, motion={},
-        frame={bottom=panelHeight+6,top=header-117},
+        frame={bottom=panelHeight+6,top=header-(showPositioning and 141 or 117)},
         joyX=joyX, joyY=joyY, joyRadius=joyRadius, joyMaxX=joyMaxX, joyMinY=controlBase,
         commands={}, tactical={},
         edit=box(right-25,header-60,50,32,"EDIT","edit"),
@@ -255,6 +255,9 @@ function UI.practiceLayout()
         pause=box(left+25,header-98,50,33,"PAUSE","pause"),
         sprint=box(joyX,joyY+joyRadius+16,math.min(78,joyMaxX-left-6),28,"SPRINT","sprint")
     }
+    if showPositioning then
+        layout.positionNotice = box(layout.centerX,header-126,width,20)
+    end
 
     local primaryA = box(aX,controlBase+diameter*.5,diameter,diameter,"PASS","pass")
     local primaryB = box(bX,controlBase+diameter*.89,diameter,diameter,"SHOOT","shoot")
@@ -613,8 +616,33 @@ local function commandLabel(item, action, game, aim)
     return actionNames[action] or item.label
 end
 
+local warningGlass = color(57,42,22,237)
+local offsidesGlass = color(63,29,41,240)
+local function drawPositionNotice(layout, game)
+    local positioning = game.positioning
+    if game.phase ~= "LIVE" or not positioning or (positioning.noticeTime or 0) <= 0 then return end
+    local message = positioning.notice
+    if type(message) ~= "string" or message == "" then return end
+    local strip = layout.positionNotice
+    local x, y, width, height = layout.centerX,layout.frame.top-15,layout.width,23
+    if strip then x, y, width, height = strip.x,strip.y,strip.w,strip.h end
+    local foul = positioning.level == "offsides"
+    local ink = foul and red or warm
+    local size = 11
+    if textSize then
+        fontSize(size)
+        local measured = textSize(message)
+        if measured > width-25 then size = math.max(9,size*(width-25)/measured) end
+    end
+    rounded(x,y,width,height,8,foul and offsidesGlass or warningGlass)
+    rounded(x-width*.5+8,y,3,height*.59,1.5,ink)
+    label(message,x+3,y,size,ink)
+    return message
+end
+
 function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel, ballEdge, passGuide)
     beginHud()
+    local positionMessage = drawPositionNotice(layout,game)
     drawAim(aim)
     drawBallEdge(ballEdge)
     passTarget(layout,passGuide)
@@ -654,8 +682,9 @@ function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel, ballEdge, pas
         local message = game.careerWaiting and game.phase == "LIVE" and "FIRST SHIFT SOON"
             or game.announcementTime > 0 and game.announcement
             or game.clock <= 0 and game.homeScore == nil and "PRACTICE COMPLETE"
-        if message and message ~= "" then
-            local y = layout.frame.top-15
+        if message and message ~= "" and message ~= positionMessage then
+            local spacing = positionMessage and not layout.positionNotice and 33 or 0
+            local y = layout.frame.top-15-spacing
             rounded(layout.centerX,y,math.min(layout.width,#message*8+32),34,12,glass)
             label(message,layout.centerX,y,14,warm)
         end
