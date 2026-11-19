@@ -671,6 +671,22 @@ local function makeHelmet(r)
     end, parts)
 end
 
+local stickSizes = {
+    short = {extension=0, butt=-.923, lowerGrip=-.37},
+    long = {extension=.46, butt=-1.36, lowerGrip=-.48}
+}
+
+local function shaft(mesh, size)
+    bar(mesh, V(0, size.butt, 0), V(0, .419 + size.extension, 0), .029, 8)
+end
+
+local function shaftTape(mesh, size)
+    bar(mesh, V(0, size.butt - .020, 0), V(0, size.butt + .163, 0), .034, 8)
+    bar(mesh, V(0, size.lowerGrip - .098, 0), V(0, size.lowerGrip + .064, 0), .032, 8)
+    bar(mesh, V(0, -.069, 0), V(0, .118, 0), .032, 8)
+    bar(mesh, V(0, size.butt - .036, 0), V(0, size.butt - .001, 0), .043, 8)
+end
+
 local function makeStick(r)
     local m = r.materials
     local root = entity(r.scene, r.body, .19, .66, -.31)
@@ -678,16 +694,14 @@ local function makeStick(r)
     r.pocket = entity(r.scene, root, 0, .70, -.10)
     r.lowerGrip = entity(r.scene, root, 0, -.37, 0)
     local parts = r.stickParts
-    part(r, root, "stick alloy", m.shaft, function(mesh)
-        bar(mesh, V(0, -.923, 0), V(0, .419, 0), .029, 8)
+    r.stickType, r.stickReachExtension = "short", 0
+    r.stickShaft = part(r, root, "stick alloy short", m.shaft, function(mesh)
+        shaft(mesh, stickSizes.short)
     end, parts)
-    part(r, root, "stick tape", m.dark, function(mesh)
-        bar(mesh, V(0, -.943, 0), V(0, -.76, 0), .034, 8)
-        bar(mesh, V(0, -.468, 0), V(0, -.306, 0), .032, 8)
-        bar(mesh, V(0, -.069, 0), V(0, .118, 0), .032, 8)
-        bar(mesh, V(0, -.959, 0), V(0, -.924, 0), .043, 8)
+    r.stickTape = part(r, root, "stick tape short", m.dark, function(mesh)
+        shaftTape(mesh, stickSizes.short)
     end, parts)
-    part(r, root, "stick scoop and sidewalls", m.stick, function(mesh)
+    r.stickHead = part(r, root, "stick scoop and sidewalls", m.stick, function(mesh)
         loft(mesh, {{.345, .042, .034}, {.409, .048, .047},
             {.448, .076, .045, -.016}, {.482, .076, .046, -.027}}, 8)
         for _, s in ipairs({-1, 1}) do
@@ -706,7 +720,7 @@ local function makeStick(r)
         rail(mesh, .026, {V(-.175, .962, -.132), V(-.096, .991, -.145),
             V(0, 1.004, -.152), V(.096, .991, -.145), V(.175, .962, -.132)}, 7)
     end, parts)
-    part(r, root, "stick woven pocket", m.mesh, function(mesh)
+    r.stickMesh = part(r, root, "stick woven pocket", m.mesh, function(mesh)
         local rows = {
             {.485, .057, -.018, -.008}, {.56, .106, -.018, .029},
             {.642, .149, -.021, .062}, {.723, .182, -.026, .068},
@@ -733,6 +747,25 @@ local function makeStick(r)
             rail(mesh, .009, points, 5)
         end
     end, parts)
+end
+
+-- Keep the upper grip at the stick origin. Move the pocket, head and mesh
+-- together so possessions and release points follow the visible equipment.
+function Character.setStickType(rig, kind)
+    if kind ~= "long" then kind = "short" end
+    if kind == rig.stickType then return end
+    local size = stickSizes[kind]
+    rig.stickType, rig.stickReachExtension = kind, size.extension
+    rig.stickShaft.model = model("stick alloy "..kind, function(mesh) shaft(mesh,size) end)
+    rig.stickTape.model = model("stick tape "..kind, function(mesh) shaftTape(mesh,size) end)
+    rig.stickHead.position = V(0,size.extension,0)
+    rig.stickMesh.position = V(0,size.extension,0)
+    rig.pocket.position = V(0,.70+size.extension,-.10)
+    rig.lowerGrip.position = V(0,size.lowerGrip,0)
+end
+
+function Character.stickSegment(rig)
+    return rig.stickRoot:transformPoint(V(0,.10,0)), rig.pocket.worldPosition
 end
 
 local glyphs = {

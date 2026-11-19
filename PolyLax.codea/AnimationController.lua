@@ -56,7 +56,66 @@ Animation.clips = {
             frame(.32, vec3(.38,.28,-.34), vec3(.08,-.52,-.85), vec3(-30,-4,-6), .31, -3, 1),
             frame(.44, vec3(.27,.49,-.35), vec3(.45,.23,-.86), vec3(-15,-4,-2), .12, 10, .3)
         }
+    },
+    pokeCheckLong = {
+        duration = .42, eventTime = .16, event = "check",
+        poses = {
+            frame(.07,vec3(.57,.69,-.40),vec3(.14,.98,.05),vec3(-5,-12,-6),.07,-17,.89),
+            frame(.16,vec3(.56,.65,-.46),vec3(.11,.16,-.98),vec3(-13,5,4),.10,4,.94),
+            frame(.28,vec3(.58,.61,-.41),vec3(.12,.55,-.81),vec3(-7,7,4),.07,10,.90),
+            frame(.36,vec3(.53,.66,-.40),vec3(.14,.98,.09),vec3(-5,2,1),.035,5,.59)
+        }
+    },
+    slapCheckLong = {
+        duration = .58, eventTime = .23, event = "check",
+        poses = {
+            frame(.10,vec3(.58,.75,-.40),vec3(.72,.67,.10),vec3(3,-30,-9),.05,-27,.68),
+            frame(.15,vec3(.60,.73,-.44),vec3(.17,.97,.09),vec3(-3,-12,0),.07,-16,.89),
+            frame(.23,vec3(.61,.67,-.48),vec3(.19,.15,-.97),vec3(-10,19,8),.10,16,.94),
+            frame(.38,vec3(.61,.53,-.48),vec3(.20,.35,-.91),vec3(-8,24,8),.06,30,.94),
+            frame(.48,vec3(.57,.62,-.42),vec3(.14,.98,.09),vec3(-5,14,5),.03,13,.71)
+        }
     }
+}
+
+-- Keep the release and catch events at the existing times. A long shaft
+-- needs a more forward windup and a shallower approach to the ground.
+local function longVariant(action, poses)
+    local clip = Animation.clips[action]
+    return {duration=clip.duration,eventTime=clip.eventTime,event=clip.event,poses=poses}
+end
+
+local longVariants = {
+    pass = longVariant("pass", {
+        frame(.16,vec3(.37,.81,-.37),vec3(.69,.66,.26),vec3(4,-28,-5),.025,-20),
+        frame(.29,vec3(.39,.83,-.49),vec3(.76,.62,-.17),vec3(-10,15,4),.035,9,.21),
+        frame(.41,vec3(.30,.56,-.47),vec3(.91,.37,-.14),vec3(-15,25,5),.035,25)
+    }),
+    shoot = longVariant("shoot", {
+        frame(.21,vec3(.46,.92,-.39),vec3(.74,.59,.32),vec3(9,-43,-8),.055,-26,.17),
+        frame(.38,vec3(.42,.84,-.50),vec3(.75,.63,-.21),vec3(-15,25,6),.07,12,.24),
+        frame(.52,vec3(.30,.49,-.48),vec3(.96,-.18,-.18),vec3(-25,35,9),.08,35,.13)
+    }),
+    catch = longVariant("catch", {
+        Animation.clips.catch.poses[1],
+        frame(.30,vec3(.34,.70,-.35),vec3(.58,.80,.13),vec3(3,-12,-4),.02,12)
+    }),
+    scoop = longVariant("scoop", {
+        frame(.08,vec3(.54,.53,-.39),vec3(.12,.97,.05),vec3(-11,-4,-2),.08,-5,.84),
+        frame(.14,vec3(.55,.48,-.38),vec3(.11,.43,-.89),vec3(-17,-6,-4),.12,-7,.93),
+        frame(.32,vec3(.52,.29,-.36),vec3(.10,-.10,-.99),vec3(-21,-4,-4),.25,-3,1),
+        frame(.44,vec3(.55,.52,-.39),vec3(.12,.60,-.79),vec3(-14,-4,-3),.11,10,.93),
+        frame(.52,vec3(.52,.60,-.39),vec3(.13,.98,.09),vec3(-9,-2,-1),.05,5,.64)
+    }),
+    dodge = longVariant("dodge", {
+        frame(.09,vec3(.31,.66,-.35),vec3(.62,.74,.10),vec3(-10,-17,-9),.12,-23),
+        frame(.23,vec3(.38,.58,-.37),vec3(.71,.68,.10),vec3(-16,-30,-20),.15,-27),
+        frame(.34,vec3(.34,.65,-.36),vec3(.61,.77,.10),vec3(-8,-13,-9),.07,-11)
+    }),
+    protect = longVariant("protect", {
+        frame(.12,vec3(.35,.67,-.35),vec3(.66,.73,.10),vec3(-5,-23,-9),.08,-24),
+        frame(.26,vec3(.35,.65,-.36),vec3(.62,.77,.10),vec3(-5,-20,-8),.06,-24)
+    })
 }
 
 local function clamp(value, minimum, maximum)
@@ -297,10 +356,18 @@ function Animation.update(controller, dt, input)
             -controller.turn * (4 + gait * 7) + swing * 2),
         crouch = 0, roll = cradle * 21 + swing * 8, freeHand = 0
     }
+    if rig.stickType == "long" then
+        base.grip = vec3(.30 + cradle * .031, .68 + breath * .012 + swing * .025,
+            -.38 + swing * .053 + cradle * .028)
+        base.shaft = vec3(.52 + cradle * .09, .85 - cradle * .06,
+            .11 + swing * .067 + cradle * .036)
+        base.roll = cradle * 15 + swing * 6
+    end
     local pose, event = base, nil
     local pocketTarget, pocketWeight
     if controller.action then
         local clip = Animation.clips[controller.action]
+        if rig.stickType == "long" then clip = longVariants[controller.action] or clip end
         local oldTime = controller.actionTime
         local newTime = oldTime + dt * controller.actionSpeed
         local sampleTime = newTime

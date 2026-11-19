@@ -267,16 +267,24 @@ function Match.new(scene, profile, homeId, awayId, rules)
             local custom = index==(match.careerPlayer or userPlayer)
             local appearance = custom and profile or playerProfile(team,slot)
             local member = roster and roster[slot]
+            local role = spec[1]
+            if index == match.careerPlayer and role == "M"
+                and (rules.careerPlayerRole == "LSM" or rules.careerPlayerRole == "SSDM") then
+                role = rules.careerPlayerRole
+            end
+            local long = role == "D" and slot-6 <= settings.maxLongPoles
+                or role == "LSM" and settings.maxLongPoles >= 4
+            P.Character.setStickType(rig, long and "long" or "short")
             if member and not custom then appearance.NUMBER=member.number+1 end
             P.Character.apply(rig, appearance, nil, match.kits[team], false)
             local homeDepth = spec[1] == "G" and -(field.goalZ-1.4) or spec[4]
             local homeX = (slot == 5 and -field.wingX) or (slot == 6 and field.wingX) or spec[3]
             local player = {
-                id=index, team=team, slot=slot, role=spec[1],
+                id=index, team=team, slot=slot, role=role, stickType=rig.stickType,
                 name=member and not custom and member.name or spec[1]..spec[2],
                 rig=rig, anim=P.AnimationController.new(rig), number=rig.numberValue,
                 homeX=homeX * -side, homeZ=clamp(homeDepth,-field.halfLength*.96,field.halfLength*.96) * side,
-                attributes=P.Defense.attributes(spec[1])
+                attributes=P.Defense.attributes(role)
             }
             if slot == 4 then player.attributes.faceoff = .68 end
             if index == match.careerPlayer then

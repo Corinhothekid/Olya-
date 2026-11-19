@@ -19,6 +19,12 @@ local function distance(x, z)
     return math.sqrt(x*x + z*z)
 end
 
+function Defense.reach(player, style)
+    local check = checks[style]
+    local extension = style ~= "body" and player.rig.stickReachExtension or 0
+    return check.reach + (extension or 0)
+end
+
 local function forwardDot(player, x, z, length)
     local yaw = math.rad(player.yaw)
     return (-math.sin(yaw)*x - math.cos(yaw)*z) / math.max(length, .001)
@@ -35,11 +41,13 @@ function Defense.configure(options)
 end
 
 function Defense.attributes(role)
+    local closeDefense = role == "D"
+    local specialist = role == "LSM" or role == "SSDM"
     return {
-        stickCheck = role == "D" and .77 or .62,
-        bodyCheck = role == "D" and .75 or .60,
-        interception = role == "D" and .76 or .65,
-        reaction = role == "G" and .80 or role == "D" and .74 or .65,
+        stickCheck = (closeDefense or role == "LSM") and .77 or .62,
+        bodyCheck = (closeDefense or role == "SSDM") and .75 or .60,
+        interception = (closeDefense or specialist) and .76 or .65,
+        reaction = role == "G" and .80 or (closeDefense or specialist) and .74 or .65,
         ballSecurity = role == "A" and .75 or .65
     }
 end
@@ -120,11 +128,14 @@ function Defense.request(match, checker, name)
     if not target and name == "body" then target = nearestContact(match, checker) end
     if not target then return end
     local _, _, length = geometry(checker, target)
-    if length > check.reach + .40 then return end
+    if length > Defense.reach(checker,name) + .40 then return end
     local skill = stat(checker, name == "body" and "bodyCheck" or "stickCheck", .63)
-    if P.AnimationController.play(checker.anim, check.clip, .86 + skill * .22) then
-        checker.checkCooldown = check.cooldown
-        return {style=name, target=target.id, skill=skill, clip=check.clip}
+    local isPole = name ~= "body" and checker.rig.stickType == "long"
+    local clip = isPole and check.clip.."Long" or check.clip
+    local cadence = isPole and .92 or 1
+    if P.AnimationController.play(checker.anim, clip, (.86 + skill * .22)*cadence) then
+        checker.checkCooldown = check.cooldown/cadence
+        return {style=name, target=target.id, skill=skill, clip=clip}
     end
 end
 
@@ -134,17 +145,25 @@ function Defense.aiChoice(match, checker, target)
     if bodyLegal(match, target, victimFacing) and length < .93 and facing >= .63
         and checker.role == "D" and target.speed >= 2.8 then return "body" end
     if facing < .06 or victimFacing < -.64 then return end
-    if length < 1.18 and (target.speed < 3.2 or target.anim.action == "pass") then return "slap" end
-    if length < checks.poke.reach - .13 then return "poke" end
+    if length < Defense.reach(checker,"slap")-.32
+        and (target.speed < 3.2 or target.anim.action == "pass") then return "slap" end
+    if length < Defense.reach(checker,"poke")-.13 then return "poke" end
 end
 
 local function stickGap(checker, target)
-    local stick = checker.rig.stickRoot
-    local base, tip = stick:transformPoint(vec3(0,.10,0)), checker.rig.pocket.worldPosition
-    local ball = target.rig.pocket.worldPosition
-    local guide = tip - base
-    local time = clamp((ball-base):dot(guide) / math.max(.001, guide:dot(guide)), 0, 1)
-    return (ball - (base+guide*time)):len()
+    local base, tip = P.Character.stickSegment(checker.rig)
+    local targetBase, targetTip = P.Character.stickSegment(target.rig)
+    local axis, targetAxis, between = tip-base, targetTip-targetBase, base-targetBase
+    local aa, ab, bb = axis:dot(axis), axis:dot(targetAxis), targetAxis:dot(targetAxis)
+    local aq, bq = axis:dot(between), targetAxis:dot(between)
+    local determinant = aa*bb - ab*ab
+    local first = determinant > .000001 and clamp((ab*bq-bb*aq)/determinant,0,1) or 0
+    local second = (ab*first+bq)/math.max(bb,.000001)
+    if second < 0 or second > 1 then
+        second = clamp(second,0,1)
+        first = clamp((ab*second-aq)/math.max(aa,.000001),0,1)
+    end
+    return (between+axis*first-targetAxis*second):len()
 end
 
 function Defense.contact(match, checker, request)
@@ -152,7 +171,7 @@ function Defense.contact(match, checker, request)
     local check = checks[request.style]
     local dx, dz, length, facing, victimFacing = geometry(checker, target)
     local body = request.style == "body"
-    local reach = check.reach + (request.skill - .65) * .20
+    local reach = Defense.reach(checker,request.style) + (request.skill - .65) * .20
     if length > reach or facing < (body and .32 or -.12) then return "miss" end
     if body and not bodyLegal(match, target, victimFacing) then return "foul" end
     if match.carrier ~= target.id or target.role == "G" then return "miss" end
@@ -166,8 +185,15 @@ function Defense.contact(match, checker, request)
         + .12 * math.max(0, victimFacing) - .13 * length / reach
     local leverage = body and (stat(checker,"strength",.60)-stat(target,"strength",.60)) or 0
     impact = impact+leverage*.18
-    if not body then impact = impact - .20 * gap end
     local stability = security * .63 + (protect and .30 or 0) + (ready and .13 or 0)
+    if not body then
+        local contactRange = .34+request.skill*.12
+        if gap >= contactRange then return "miss" end
+        local quality = 1-gap/contactRange
+        impact = request.skill*.48 + quality*.36 + math.max(0,facing)*.20
+            + math.max(0,victimFacing)*.10 - .12*length/reach - (checker.runningFatigue or 0)*.09
+        stability = .23 + security*.37 + (protect and .20 or 0) + (ready and .07 or 0)
+    end
     if impact < stability then return "miss" end
 
     local range = math.max(.28, length)

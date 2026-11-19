@@ -17,7 +17,9 @@ Career.positions = {
     {label="Midfield", slot=5, attributes={speed=72, stamina=71, passing=65, strength=66}},
     {label="Defense", slot=7, attributes={stickCheck=72, bodyCheck=70, interception=70, strength=73}},
     {label="Faceoff", slot=4, attributes={faceoff=76, reaction=69, stamina=70, strength=70}},
-    {label="Goalie", slot=10, attributes={reflexes=75, handSpeed=74, clearingAccuracy=68, strength=62}}
+    {label="Goalie", slot=10, attributes={reflexes=75, handSpeed=74, clearingAccuracy=68, strength=62}},
+    {label="Long-Stick Mid", slot=5, role="LSM"},
+    {label="Short-Stick Def Mid", slot=6, role="SSDM"}
 }
 
 Career.stages = {highSchool="HIGH SCHOOL", college="COLLEGE", professional="PROFESSIONAL"}
@@ -158,7 +160,8 @@ function Career.matchOptions(career, fixture)
         faceoffDifficulty=career.stage == "professional" and "HARD" or "NORMAL",
         careerEntryDelay=P.CareerSeason.status(career).starter and 0 or 4,
         fieldTeam=fixture.home and career.team or fixture.opponent, venueAway=not fixture.home,
-        careerPlayerSlot=position(career.position).slot, playerName=career.name,
+        careerPlayerSlot=position(career.position).slot, careerPlayerRole=position(career.position).role,
+        playerName=career.name,
         playerAttributes=copy(career.attributes)}
 end
 

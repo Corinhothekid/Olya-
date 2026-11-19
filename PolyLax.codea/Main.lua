@@ -55,6 +55,9 @@ local function applyCreatorProfile()
         uniform=P.Athlete.uniform(state.career,state.careerKit=="away")
         personalColors=false
     end
+    local careerPosition = state.careerCreator and P.Career.positions[state.career.position]
+    local long = careerPosition and (careerPosition.slot == 7 or careerPosition.role == "LSM")
+    P.Character.setStickType(state.creator.rig,long and "long" or "short")
     P.Character.apply(state.creator.rig,creatorProfile(),selected,uniform,personalColors)
 end
 

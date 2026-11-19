@@ -52,7 +52,9 @@ local presets = {
         groundBalls=66, lacrosseIQ=65},
     {acceleration=70, faceoff=76, defensiveAwareness=69, stamina=70, strength=70,
         groundBalls=67},
-    {reflexes=75, goaliePositioning=74, passing=68, strength=62, lacrosseIQ=64}
+    {reflexes=75, goaliePositioning=74, passing=68, strength=62, lacrosseIQ=64},
+    {speed=70, acceleration=67, stamina=70, groundBalls=69, stickCheck=73, defensiveAwareness=71},
+    {speed=69, acceleration=68, agility=70, stamina=71, bodyCheck=70, defensiveAwareness=72}
 }
 
 local weights = {
@@ -65,12 +67,16 @@ local weights = {
     {faceoff=8, acceleration=3, stamina=4, strength=4, ballControl=2,
         groundBalls=4, defensiveAwareness=3, lacrosseIQ=2},
     {reflexes=8, goaliePositioning=8, passing=4, agility=2, acceleration=2,
-        ballControl=2, strength=1, lacrosseIQ=3}
+        ballControl=2, strength=1, lacrosseIQ=3},
+    {speed=4, acceleration=3, stamina=3, groundBalls=5, stickCheck=5,
+        defensiveAwareness=5, passing=2, lacrosseIQ=3},
+    {speed=4, agility=4, stamina=4, strength=3, bodyCheck=4,
+        defensiveAwareness=5, groundBalls=2, lacrosseIQ=4}
 }
 
 local roleIndex = {
     A=1, ATTACK=1, M=2, MIDFIELD=2, D=3, DEFENSE=3,
-    F=4, FO=4, FACEOFF=4, G=5, GOALIE=5, KEEPER=5
+    F=4, FO=4, FACEOFF=4, G=5, GOALIE=5, KEEPER=5, LSM=6, SSDM=7
 }
 
 local function position(role)

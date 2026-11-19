@@ -77,7 +77,11 @@ local function catchOffset(receiver, source, x, z)
     end
     dx, dz = dx/range, dz/range
     local scale = receiver.rig.proportions.scale
-    return vec3((.67*dx-.82*dz)*scale.x, 2.23*scale.y, (.67*dz+.82*dx)*scale.z)
+    local extension = receiver.rig.stickReachExtension or 0
+    -- The catch pose's tilted shaft places the long pocket farther to the right and higher.
+    local forward, lateral = .67 + .22*extension, .82 + .70*extension
+    return vec3((forward*dx-lateral*dz)*scale.x, (2.23+.714*extension)*scale.y,
+        (forward*dz+lateral*dx)*scale.z)
 end
 
 local function dispersion(game, pending, sender, origin, point, range)
