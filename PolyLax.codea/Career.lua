@@ -151,7 +151,9 @@ end
 function Career.matchOptions(career, fixture)
     local home = P.TeamUniform.get(career.team)
     local age = home.ruleset
-    return {name="Career short game", periods=2, periodLength=60, intermissionTime=2,
+    local ruleset = ({highSchool="highSchool",ncaa="ncaa",club="collegeClub",
+        professional="professional"})[home.fieldType] or "arcade"
+    return {name="Career short game", profile=ruleset, periods=2, periodLength=60, intermissionTime=2,
         ageGroup=age, bodyContact=age == "highSchool" or age == "adult",
         faceoffDifficulty=career.stage == "professional" and "HARD" or "NORMAL",
         careerEntryDelay=P.CareerSeason.status(career).starter and 0 or 4,

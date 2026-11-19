@@ -207,7 +207,7 @@ function Style.screen(page, l, elapsed)
     else
         fieldMarks(l)
         local tempo = .5+.5*math.sin((elapsed or 0)*1.6)
-        local title = page == "FRONT" and "POLYLAX 2.0" or "Play Modes"
+        local title = page == "FRONT" and "POLYLAX 3.0" or "Play Modes"
         local size = page == "FRONT" and math.min(48,l.w*.164) or 30
         font("AvenirNext-HeavyItalic")
         label(title,l.x,l.titleY+9,size,palette.white,false,l.w)

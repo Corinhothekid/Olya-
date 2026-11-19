@@ -75,26 +75,6 @@ end
 
 local screenFoul
 
-local function matchRules(options)
-    options = options or {}
-    local ageGroup, bodyContact = P.Defense.configure(options)
-    local faceoffOptions = type(options.faceoff) == "table" and options.faceoff or {}
-    return {
-        name = options.name or "Arcade testing",
-        periods = math.floor(clamp(tonumber(options.periods) or 4, 1, 8)),
-        periodLength = clamp(tonumber(options.periodLength) or 90, 1, 900),
-        intermissionTime = clamp(tonumber(options.intermissionTime) or 2.4, .4, 12),
-        goalTime = clamp(tonumber(options.goalTime) or 1.7, .6, 5),
-        foulTime = clamp(tonumber(options.foulTime) or 1.05, .4, 5),
-        ageGroup = ageGroup, bodyContact = bodyContact,
-        faceoff = {
-            difficulty = faceoffOptions.difficulty or options.faceoffDifficulty,
-            setTime = faceoffOptions.setTime, duration = faceoffOptions.duration,
-            exitTime = faceoffOptions.exitTime
-        }
-    }
-end
-
 local function makeBall(scene)
     local ball = scene:entity()
     ball.model = craft.model.icosphere(ballRadius, 1, true)
@@ -141,7 +121,7 @@ local function careerLock(match)
     if type(id) == "number" and match.squad[id] then return id end
 end
 
-local function attach(match, index, select)
+local function attach(match, index, select, source)
     local player = match.squad[index]
     P.Statistics.possession(match,index)
     local draw = match.faceoffScramble
@@ -149,25 +129,29 @@ local function attach(match, index, select)
         local contestant = player.team == 1 and draw.homeId or draw.awayId
         Match.recordStat(match, contestant, "faceoffs")
         match.faceoffScramble = nil
+        source = "faceoff"
     end
     match.carrier, match.lastTouch, match.assist = index, player.team, nil
     match.flight, match.loose, match.pending = nil, nil, nil
-    match.scoopPlayer = nil
+    match.scoopPlayer, match.boundaryShot = nil, nil
     match.ball.position = pocket(player)
     match.ballVelocity = vec3()
+    P.MatchRules.possession(match,index,source)
     if select and player.team == 1 and not careerLock(match) then match.controlled = index end
     if match.mode == "SWING" then match.mode = "SET" end
 end
 
-local function freeBall(match, position, velocity, lastTouch)
+local function freeBall(match, position, velocity, lastTouch, fromShot)
     match.carrier, match.flight, match.pending, match.scoopPlayer = nil, nil, nil, nil
     match.loose, match.lastTouch, match.assist = true, lastTouch, nil
+    match.boundaryShot = fromShot or nil
     match.ball.position, match.ballVelocity = position, velocity
     if match.mode == "SWING" then match.mode = "SET" end
 end
 
 local function startFaceoff(match)
     P.Statistics.resetPossession(match)
+    P.MatchRules.stop(match)
     local afterPeriod = match.phase == "INTERMISSION"
     P.Screens.reset(match)
     match.tactical, match.cut, match.swingDirection = nil, nil, nil
@@ -175,7 +159,7 @@ local function startFaceoff(match)
     match.phase, match.phaseTime = "FACEOFF", 0
     match.mode, match.clearTime = "SET", 0
     match.pending, match.flight, match.loose, match.carrier = nil, nil, nil, nil
-    match.scoopPlayer, match.lastTouch, match.inNet = nil, nil, nil
+    match.scoopPlayer, match.lastTouch, match.inNet, match.boundaryShot = nil, nil, nil, nil
     match.foul = nil
     match.faceoffScramble = nil
     local first = match.squad[match.teams[1][4]]
@@ -222,6 +206,7 @@ local function resetMatch(match)
     end
     match.ai = P.MatchAI.new()
     P.Statistics.new(match,match.statisticsOptions)
+    P.MatchRules.reset(match)
     startFaceoff(match)
 end
 
@@ -252,12 +237,13 @@ end
 
 function Match.new(scene, profile, homeId, awayId, rules)
     rules = rules or {}
+    local settings = P.MatchRules.configure(rules)
     local venue = P.TeamUniform.get(rules.fieldTeam or homeId)
-    local field = P.Field.new(scene, venue.field, rules.fieldMetrics)
+    local field = P.Field.new(scene, venue.field, settings.fieldMetrics)
     local homeGoal = field.goals[1]
     local match = {
         field=field, venueAway=rules.venueAway == true, goalsByTeam=field.goals, goal=vec3(homeGoal.x, homeGoal.top * .5, homeGoal.z),
-        ball=makeBall(scene), marker=makeMarker(scene), squad={}, teams={{},{}}, keepers={}, rules=matchRules(rules)
+        ball=makeBall(scene), marker=makeMarker(scene), squad={}, teams={{},{}}, keepers={}, rules=settings
     }
     match.statisticsOptions = rules.statistics
     match.movementProposals = {}
@@ -283,11 +269,13 @@ function Match.new(scene, profile, homeId, awayId, rules)
             local member = roster and roster[slot]
             if member and not custom then appearance.NUMBER=member.number+1 end
             P.Character.apply(rig, appearance, nil, match.kits[team], false)
+            local homeDepth = spec[1] == "G" and -(field.goalZ-1.4) or spec[4]
+            local homeX = (slot == 5 and -field.wingX) or (slot == 6 and field.wingX) or spec[3]
             local player = {
                 id=index, team=team, slot=slot, role=spec[1],
                 name=member and not custom and member.name or spec[1]..spec[2],
                 rig=rig, anim=P.AnimationController.new(rig), number=rig.numberValue,
-                homeX=spec[3] * -side, homeZ=spec[4] * side,
+                homeX=homeX * -side, homeZ=clamp(homeDepth,-field.halfLength*.96,field.halfLength*.96) * side,
                 attributes=P.Defense.attributes(spec[1])
             }
             if slot == 4 then player.attributes.faceoff = .68 end
@@ -503,7 +491,7 @@ local function proposeMovement(match, player, vx, vz, dt, proposal)
     local field = match.field
     local targetX = clamp(x + (player.vx + dx * speedup) * dt, -.987 * field.halfWidth, .987 * field.halfWidth)
     local targetZ = clamp(z + (player.vz + dz * speedup) * dt, -.991 * field.halfLength, .991 * field.halfLength)
-    -- Keep the defenseless crease free of attacking players.
+    -- Keep opposing field players out of the defending crease.
     if player.role ~= "G" then
         local goal = match.goalsByTeam[player.team]
         local gx, gz = targetX - goal.x, targetZ - goal.z
@@ -648,6 +636,7 @@ local function release(match, pending)
             and y >= ballRadius and y < goal.top - ballRadius
         Match.recordStat(match, player.id, "shots")
         P.Screens.creditShot(match,player.id,match.screenStat,flight)
+        P.MatchRules.shotReleased(match,flight)
         match.ballVelocity = flight.velocity
     end
     match.lastTouch, match.carrier = player.team, nil
@@ -741,12 +730,13 @@ local function trySave(match, flight, previous, position, velocity, hit)
         Match.recordStat(match, flight.from, "shotsOnGoal")
     end
     P.Statistics.goalkeeper(match,keeper.id,flight.onTarget and "save" or "block",flight.from)
+    P.MatchRules.shotContact(match,flight,"SAVE")
     if save.style then P.AnimationController.play(keeper.anim, save.style) end
     if save.caught then
         attach(match, keeper.id, false)
         announce(match, flight.onTarget and "SAVE" or "SHOT BLOCKED")
     else
-        freeBall(match, save.position, save.velocity, keeper.team)
+        freeBall(match, save.position, save.velocity, keeper.team, true)
         announce(match, flight.onTarget and "SAVE · REBOUND" or "SHOT BLOCKED")
     end
     return true
@@ -822,7 +812,8 @@ local function updateFlight(match, dt, catchIndex)
             score(match, flight, hit)
             return
         elseif hit.kind == "POST" or hit.kind == "CROSSBAR" then
-            freeBall(match, hit.position, hit.velocity, flight.team)
+            P.MatchRules.shotContact(match,flight,hit.kind)
+            freeBall(match, hit.position, hit.velocity, flight.team, true)
             P.Statistics.record(match,flight.from,"pipeHits",1,{reason=hit.kind})
             announce(match, hit.kind == "POST" and "OFF THE POST" or "OFF THE BAR")
             return
@@ -838,19 +829,27 @@ local function updateFlight(match, dt, catchIndex)
 
     if position.y <= ballRadius or time >= flight.duration then
         position.y = math.max(ballRadius, position.y)
-        freeBall(match, position, velocity * .36, flight.team)
+        freeBall(match, position, velocity * .36, flight.team, true)
     else
         match.ball.position, match.ballVelocity = position, velocity
     end
 end
 
-local function outOfBounds(match, position)
+local function restartPossession(match, team, position, fromBoundary)
     local field = match.field
-    local team = 3 - (match.lastTouch or 2)
     local selected, best = nil, math.huge
     local fallback, fallbackDistance = nil, math.huge
-    local x = clamp(position.x, -field.halfWidth + .9, field.halfWidth - .9)
-    local z = clamp(position.z, -field.halfLength + .9, field.halfLength - .9)
+    local margin = fromBoundary and .9 or 1.4
+    local x = clamp(position.x, -field.halfWidth + margin, field.halfWidth - margin)
+    local z = clamp(position.z, -field.halfLength + margin, field.halfLength - margin)
+    local opponentGoal = match.goalsByTeam[team]
+    local gx, gz = x-opponentGoal.x, z-opponentGoal.z
+    local crease = field.creaseRadius + .45
+    local goalDistance = distance(gx,gz)
+    if goalDistance < crease then
+        if goalDistance < .01 then gx, gz, goalDistance = 1, 0, 1 end
+        x, z = opponentGoal.x+gx*crease/goalDistance, opponentGoal.z+gz*crease/goalDistance
+    end
     local half = P.Midfield.halfAt(match, team, z)
     for _, index in ipairs(match.teams[team]) do
         local player = match.squad[index]
@@ -869,8 +868,23 @@ local function outOfBounds(match, position)
     selected.x, selected.z, selected.vx, selected.vz = x, z, 0, 0
     place(selected)
     P.AnimationController.reset(selected.anim)
-    attach(match, selected.id, true)
-    announce(match, "OUT OF BOUNDS")
+    attach(match, selected.id, true, "restart")
+    return selected
+end
+
+local function outOfBounds(match, position)
+    local team = 3 - (match.lastTouch or 2)
+    local shot = match.boundaryShot or match.flight and match.flight.kind == "shot"
+    if shot and match.rules.shotBoundary == "nearest" then
+        local closest = math.huge
+        for _, player in ipairs(match.squad) do
+            if player.onField ~= false and player.active ~= false and not player.bench then
+                local gap = distance(player.x-position.x,player.z-position.z)
+                if gap < closest then team, closest = player.team, gap end
+            end
+        end
+    end
+    if restartPossession(match,team,position,true) then announce(match,"OUT OF BOUNDS") end
 end
 
 local function updateLoose(match, dt, scoopIndex)
@@ -899,6 +913,7 @@ local function updateLoose(match, dt, scoopIndex)
 end
 
 local function settlePossession(match, dt, flight, loose, catchIndex, scoopIndex)
+    local previous = match.ball.position
     if flight and match.flight == flight then
         updateFlight(match, dt, catchIndex)
     elseif loose and match.loose then
@@ -910,9 +925,20 @@ local function settlePossession(match, dt, flight, loose, catchIndex, scoopIndex
     end
     if match.phase ~= "LIVE" then return end
     local position = match.ball.position
-    if not match.carrier and (math.abs(position.x) > match.field.halfWidth
-        or math.abs(position.z) > match.field.halfLength) then
-        outOfBounds(match, position)
+    local field = match.field
+    local outsideX, outsideZ = math.abs(position.x)>field.halfWidth, math.abs(position.z)>field.halfLength
+    if not match.carrier and (outsideX or outsideZ) then
+        local travel = position-previous
+        local edgeTime = 1
+        if outsideX and math.abs(travel.x)>.0001 then
+            local edge = position.x>0 and field.halfWidth or -field.halfWidth
+            edgeTime = math.min(edgeTime,(edge-previous.x)/travel.x)
+        end
+        if outsideZ and math.abs(travel.z)>.0001 then
+            local edge = position.z>0 and field.halfLength or -field.halfLength
+            edgeTime = math.min(edgeTime,(edge-previous.z)/travel.z)
+        end
+        outOfBounds(match,previous+travel*clamp(edgeTime,0,1))
     end
 end
 
@@ -990,7 +1016,7 @@ local function faceoff(match, dt, moveX, moveZ)
         announce(match, "LOOSE DRAW")
     else
         local player = winner == 1 and first or second
-        attach(match, player.id, not careerLock(match))
+        attach(match, player.id, not careerLock(match), "faceoff")
         player.faceoffExit = {x=result.exitX, z=result.exitZ, remaining=.25}
         Match.recordStat(match, player.id, "faceoffs")
         local team = winner == 1 and match.homeTeam or match.awayTeam
@@ -1017,6 +1043,22 @@ local function pursueDraw(match, intents, dt)
 end
 
 local function live(match, dt, moveX, moveZ)
+    local violation = P.MatchRules.tick(match,dt)
+    if violation then
+        local holder = match.carrier or (match.flight and match.flight.from) or violation.player
+        if holder and match.squad[holder].team == violation.team then
+            Match.recordStat(match,holder,"turnovers")
+            P.Statistics.turnover(match,holder,violation.reason)
+        end
+        local messages = {clearClock="CLEAR CLOCK VIOLATION", shotClock="SHOT CLOCK VIOLATION",
+            creaseClock="CREASE COUNT VIOLATION", overAndBack="OVER AND BACK"}
+        P.Screens.reset(match)
+        match.tactical, match.cut, match.swingDirection = nil, nil, nil
+        match.mode, match.clearTime = "SET", 0
+        local restart = restartPossession(match,3-violation.team,match.ball.position,false)
+        if restart then announce(match,messages[violation.reason] or "POSSESSION AWARDED") end
+        return
+    end
     if match.careerWaiting and match.elapsed >= match.careerEntryDelay then
         match.careerWaiting = false
         announce(match, "YOUR SHIFT", 1.7)
@@ -1035,6 +1077,21 @@ local function live(match, dt, moveX, moveZ)
     if match.flight then P.Defense.prepareIntercept(match, match.flight) end
     if match.loose and not match.careerWaiting then startScoop(match, match.squad[match.controlled]) end
     movePlayers(match, dt, moveX, moveZ, intents)
+    local crossing = match.positioning.blocked[match.controlled]
+    local holder, offender = match.squad[match.carrier], match.squad[match.controlled]
+    if match.rules.profile ~= "arcade" and crossing and crossing.reason == "minimum"
+        and holder and offender.team == holder.team and not match.careerWaiting then
+        Match.recordStat(match,holder.id,"turnovers")
+        P.Statistics.turnover(match,holder.id,"offsides")
+        Match.recordStat(match,offender.id,"fouls")
+        P.Statistics.penalty(match,offender.id,"technical",0,{reason="offsides"})
+        P.Screens.reset(match)
+        match.tactical, match.cut, match.swingDirection = nil, nil, nil
+        match.mode, match.clearTime = "SET", 0
+        restartPossession(match,3-offender.team,pocket(holder),false)
+        announce(match,"OFFSIDES")
+        return
+    end
     P.Screens.update(match,dt,match.screenCallbacks)
     if match.phase~="LIVE" then return end
     local animation = P.AnimationController

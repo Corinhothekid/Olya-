@@ -640,9 +640,24 @@ local function drawPositionNotice(layout, game)
     return message
 end
 
+local function drawRulesClock(layout, game)
+    local strip, clock = layout.positionNotice, game.ruleClock
+    if not strip or game.phase ~= "LIVE" or not clock then return end
+    local labels = {}
+    if clock.shot then labels[#labels+1] = "SHOT "..math.ceil(clock.shot) end
+    if clock.clear then labels[#labels+1] = "CLEAR "..math.ceil(clock.clear) end
+    if clock.crease then labels[#labels+1] = "CREASE "..math.ceil(clock.crease) end
+    if #labels == 0 then return end
+    local remaining = math.min(clock.shot or math.huge,clock.clear or math.huge,
+        clock.crease or math.huge)
+    rounded(strip.x,strip.y,strip.w,strip.h,8,glassSoft)
+    label(table.concat(labels,"    ·    "),strip.x,strip.y,11,remaining <= 5 and warm or white)
+end
+
 function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel, ballEdge, passGuide)
     beginHud()
     local positionMessage = drawPositionNotice(layout,game)
+    if not positionMessage then drawRulesClock(layout,game) end
     drawAim(aim)
     drawBallEdge(ballEdge)
     passTarget(layout,passGuide)
