@@ -156,7 +156,9 @@ function screens.SETTINGS(layout, data, options)
     local relay=relayURL(data,options)
     stack(layout,{
         item("CREATOR","Player Creator","Customize the Quick Play athlete"),
-        item("EDIT_RELAY","Clubs relay server",field(options,"EDIT_RELAY",relay,"Set the online server address"))
+        item("EDIT_RELAY","Clubs relay server",field(options,"EDIT_RELAY",relay,"Set the online server address")),
+        item("MENU_MUSIC",options.menuMuted and "Menu Music Off" or "Menu Music On",
+            options.hasMenuTheme and "Tap to change" or "Optional PolyLaxTheme asset")
     },68)
 end
 

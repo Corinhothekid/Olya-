@@ -40,6 +40,8 @@
 		<string>ClubsUI</string>
 		<string>ClubsMatch</string>
 		<string>ClubsNet</string>
+		<string>MenuAssets</string>
+		<string>MenuShowcase</string>
 		<string>CareerSeason</string>
 	</array>
 </dict>

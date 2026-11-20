@@ -4,7 +4,14 @@ local P = PolyLax
 local state
 
 local function navigate(page)
+    local previous = state.page
+    if state.menuAssets and previous == "FRONT" and page ~= "FRONT" then
+        P.MenuAssets.leave(state.menuAssets)
+    end
     state.page, state.pageAge, state.layout = page, 0, nil
+    if state.menuAssets and page == "FRONT" and previous ~= "FRONT" and state.menuInteracted then
+        P.MenuAssets.enter(state.menuAssets)
+    end
 end
 
 local function configuredScene()
@@ -538,7 +545,8 @@ local function clubLayout()
         canCreate=not lobby,hostEnabled=canRequest and not lobby and state.clubs.club~=nil,
         canConnect=canRequest and not lobby and #(state.clubCode or "")==8,
         canReady=canRequest and waiting and member~=nil,ready=member and member.ready,canStart=canStart,
-        canResume=lobby and lobby.phase=="match" and state.clubPlay~=nil
+        canResume=lobby and lobby.phase=="match" and state.clubPlay~=nil,
+        menuMuted=state.menuAssets.muted,hasMenuTheme=state.menuAssets.hasTheme
     })
 end
 
@@ -594,6 +602,8 @@ local function clubsTouch(touch)
         openCreator()
     elseif id == "DEVELOPMENT" then
         openDevelopment(true)
+    elseif id == "MENU_MUSIC" then
+        P.MenuAssets.toggleMute(state.menuAssets)
     elseif id == "EDIT_NAME" or id == "EDIT_CODE" or id == "EDIT_RELAY" then
         if not showKeyboard then return end
         if id=="EDIT_RELAY" and state.clubsNet and state.clubsNet.session then
@@ -809,7 +819,7 @@ function setup()
     end
     local profile = P.Profile.load()
     state = {profile=profile, uniform=P.TeamUniform.fromProfile(profile),
-        categoryIndex=4,career=P.Career.load(),awardState={}}
+        categoryIndex=4,career=P.Career.load(),awardState={},menuAssets=P.MenuAssets.load()}
     openMenu("FRONT")
 end
 
@@ -850,12 +860,42 @@ local function matchPresentation(play)
     end
 end
 
+local function renderShowcase(showcase, dt)
+    P.MenuShowcase.update(showcase,dt)
+    showcase.scene:update(dt)
+    showcase.scene:draw()
+end
+
+local function frontScene(dt)
+    if state.menuShowcaseFailed then return false end
+    if not state.menuShowcase then
+        local ok, showcase = pcall(function()
+            return P.MenuShowcase.new(configuredScene(),state.profile.TEAM,state.profile.OPPONENT)
+        end)
+        if not ok then
+            state.menuShowcaseFailed = true
+            print("PolyLax menu showcase unavailable: "..tostring(showcase))
+            return false
+        end
+        state.menuShowcase = showcase
+    end
+    local ok, message = pcall(renderShowcase,state.menuShowcase,dt)
+    if not ok then
+        state.menuShowcaseFailed = true
+        state.menuShowcase = nil
+        print("PolyLax menu showcase unavailable: "..tostring(message))
+    end
+    return ok
+end
+
 function draw()
     local dt = math.max(0, math.min(DeltaTime or 1/60, .05))
     state.pageAge = state.pageAge + dt
     updateClubs(dt)
     if isMenu(state.page) then
-        P.Style.screen(state.page,menuLayout(),state.pageAge)
+        local front = state.page=="FRONT"
+        local shown = front and frontScene(dt)
+        P.Style.screen(state.page,menuLayout(),state.pageAge,shown,front and state.menuAssets or nil)
         return
     end
     if state.page=="CLUBS" then
@@ -1214,6 +1254,10 @@ end
 
 function touched(touch)
     if not state then return end
+    if touch.state==BEGAN and not state.menuInteracted then
+        state.menuInteracted=true
+        if state.page=="FRONT" then P.MenuAssets.enter(state.menuAssets) end
+    end
     if isMenu(state.page) then
         menuTouch(touch)
     elseif state.page == "CLUBS" then
@@ -1247,14 +1291,14 @@ function setup()
     startupError = nil
     runChecked("PolyLax could not start", function()
         assert(type(runSetup) == "function" and type(runFrame) == "function",
-            "Install the complete PolyLax 3.1 Main tab.")
+            "Install the complete PolyLax 3.2 Main tab.")
         local modules = PolyLax or {}
         local missing = {}
         for _, name in ipairs({
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "Midfield", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "MatchRules", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation", "Clubs", "ClubsUI", "ClubsMatch", "ClubsNet"
+            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation", "Clubs", "ClubsUI", "ClubsMatch", "ClubsNet", "MenuShowcase", "MenuAssets"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

@@ -111,8 +111,11 @@ function Style.screenLayout(page, options)
         dashboard.overlay = {x=x,y=(top+bottom)*.5,w=w+16,h=paneHeight}
         dashboard.titleY = dashboard.overlay.y+paneHeight*.5-34
         firstTop = dashboard.titleY-31
+    elseif page == "FRONT" then
+        firstTop = bottom+stack+16
+        dashboard.titleY = top-math.min(82,math.max(34,(top-firstTop)*.27))
     else
-        local reserve = page == "FRONT" and math.min(183,room*.37) or math.min(147,room*.30)
+        local reserve = math.min(147,room*.30)
         firstTop = math.max(bottom+stack+20,top-reserve)
         dashboard.titleY = (top+firstTop)*.5
     end
@@ -206,9 +209,9 @@ local function drawButton(l, item)
     end
 end
 
-function Style.screen(page, l, elapsed)
+function Style.screen(page, l, elapsed, showcase, menuAssets)
     page = l.page or page
-    if page ~= "PAUSE" then background(palette.deep) end
+    if page ~= "PAUSE" and not showcase then background(palette.deep) end
     pushStyle()
     pushMatrix()
     resetMatrix()
@@ -226,14 +229,27 @@ function Style.screen(page, l, elapsed)
         Style.rounded(panel.x,panel.y,panel.w,panel.h,20,banner)
         label("Paused",l.x,l.titleY,28,palette.white)
     else
-        fieldMarks(l)
+        if showcase then
+            fill(8,14,26,53)
+            rect(WIDTH*.5,HEIGHT*.5,WIDTH,HEIGHT)
+            local panelTop = l.buttons[1].y + l.buttons[1].h*.5 + 19
+            fill(8,14,26,96)
+            rect(WIDTH*.5,panelTop*.5,WIDTH,panelTop)
+        else
+            fieldMarks(l)
+        end
+        local logoHeight = math.min(115,(l.top-l.titleY)*1.38)
+        local hasLogo = menuAssets and PolyLax.MenuAssets.drawLogo(menuAssets,l.x,l.titleY,l.w*.94,logoHeight)
         local tempo = .5+.5*math.sin((elapsed or 0)*1.6)
-        local title = page == "FRONT" and "POLYLAX 3.1" or "Play Modes"
-        local size = page == "FRONT" and math.min(48,l.w*.164) or 30
-        font("AvenirNext-HeavyItalic")
-        label(title,l.x,l.titleY+9,size,palette.white,false,l.w)
-        font("AvenirNext-DemiBold")
-        Style.rounded(l.x,l.titleY-25,41+tempo*7,2,1,palette.glow)
+        if not hasLogo then
+            local title = page == "FRONT" and "POLYLAX 3.2" or "Play Modes"
+            local size = page == "FRONT" and math.min(48,l.w*.164) or 30
+            font("AvenirNext-HeavyItalic")
+            if showcase then label(title,l.x+1,l.titleY+7,size,palette.deep,false,l.w) end
+            label(title,l.x,l.titleY+9,size,palette.white,false,l.w)
+            font("AvenirNext-DemiBold")
+            Style.rounded(l.x,l.titleY-25,41+tempo*7,2,1,palette.glow)
+        end
     end
     for _,item in ipairs(l.buttons) do drawButton(l,item) end
     popMatrix()
