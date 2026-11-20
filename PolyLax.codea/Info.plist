@@ -38,6 +38,8 @@
 		<string>CareerUI</string>
 		<string>Clubs</string>
 		<string>ClubsUI</string>
+		<string>ClubsMatch</string>
+		<string>ClubsNet</string>
 		<string>CareerSeason</string>
 	</array>
 </dict>

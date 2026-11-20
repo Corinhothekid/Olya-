@@ -296,8 +296,10 @@ function UI.action(game, item)
     if not item then return nil end
     local id = item.id
     if game.careerWaiting or id == "switch" and game.careerPlayer then return nil end
+    if game.clubsPlayer and (id=="switch" or item.tactical) then return nil end
     if game.phase == "FACEOFF" then
         local draw = game.faceoff
+        if game.clubsPlayer and (not draw or game.clubsPlayer~=draw.home.id) then return nil end
         if draw and (draw.userTeam == false or draw.phase == "EXIT") then return nil end
         if id == "pass" and (not draw or draw.meter == nil) then return nil end
         return faceoffActions[id]
@@ -463,8 +465,10 @@ local function drawScore(layout, game)
     local width = math.min(layout.width-116,math.max(114,#status*6.5+16))
     rounded(left+width*.5,layout.edit.y,width,32,10,glassSoft)
     leftLabel(status,left+8,layout.edit.y,11,white)
-    chip(layout,layout.reset,"RESET")
-    chip(layout,layout.edit,"EDIT")
+    if not game.clubsPlayer then
+        chip(layout,layout.reset,"RESET")
+        chip(layout,layout.edit,"EDIT")
+    end
 end
 
 local stickFace = color(13,19,26,232)
@@ -662,7 +666,7 @@ function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel, ballEdge, pas
     drawBallEdge(ballEdge)
     passTarget(layout,passGuide)
     drawScore(layout,game)
-    chip(layout,layout.pause,"PAUSE","pause")
+    chip(layout,layout.pause,game.clubsPlayer and "LOBBY" or "PAUSE","pause")
     chip(layout,layout.camera,cameraLabel or "CAMERA","camera")
     chip(layout,layout.zoomOut,"","zoomOut")
     chip(layout,layout.zoomIn,"","zoomIn")
@@ -694,7 +698,7 @@ function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel, ballEdge, pas
         finalScore(game,layout)
     else
         drawFaceoff(layout,game)
-        local message = game.careerWaiting and game.phase == "LIVE" and "FIRST SHIFT SOON"
+        local message = game.clubsStatus or game.careerWaiting and game.phase == "LIVE" and "FIRST SHIFT SOON"
             or game.announcementTime > 0 and game.announcement
             or game.clock <= 0 and game.homeScore == nil and "PRACTICE COMPLETE"
         if message and message ~= "" and message ~= positionMessage then

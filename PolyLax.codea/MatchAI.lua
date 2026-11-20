@@ -40,6 +40,11 @@ local function midfielder(player)
     return player.role == "M" or player.role == "LSM" or player.role == "SSDM"
 end
 
+local function humanControls(match, id)
+    if match.humans then return match.humans[id] ~= nil end
+    return id == match.controlled and not match.careerWaiting
+end
+
 local function attackingSign(match, team)
     local goal = match.goalsByTeam[team]
     return goal.attackSign or (goal.z < 0 and -1 or 1)
@@ -169,7 +174,7 @@ local function useScreen(match, ai, tactic, carrier, defender, pressure, depth, 
         and depth > 7 and depth < 23 and not carrier.anim.action
         and now >= (tactic.nextPick or 0) then
         local plan = P.Tactics.pick(match, carrier.id, defender.id)
-        if plan then
+        if plan and not (match.humans and humanControls(match,plan.screener)) then
             screen = screens.request(match, plan.screener, carrier.id, defender.id, plan)
             if screen then tactic.nextPick = now + 5 end
         end
@@ -333,7 +338,7 @@ local function offBallAttack(match, ai, snapshot, team)
         tactic.cut = nil
     end
 
-    if carrierID == match.controlled and not match.careerWaiting then return end
+    if humanControls(match,carrierID) then return end
     if not match.pending and not match.flight
         and useScreen(match, ai, tactic, carrier, defender, pressure, distance, goal, intent) then return end
 
@@ -567,7 +572,7 @@ local function defend(match, ai, snapshot, team)
             local best = math.huge
             for _, id in ipairs(match.teams[team]) do
                 local player = match.squad[id]
-                if player.role == "A" and (id ~= match.controlled or match.careerWaiting) then
+                if player.role == "A" and not humanControls(match,id) then
                     local gap = distanceSquared(player.x,player.z,carrier.x,carrier.z)
                     if gap < best then onBall,best=id,gap end
                 end
@@ -687,17 +692,32 @@ local function assignLoose(match, ai, snapshot, team)
     end
 end
 
-local function requestCrossing(match,ai,team,sign)
-    local human = not match.careerWaiting and match.squad[match.controlled]
+local function humanCrossing(match, human, team, sign, moveZ)
     if human and human.team == team and math.abs(human.z) <= 10 then
-        local advance = -(match.moveZ or 0)*sign
+        local advance = -(moveZ or 0)*sign
         if math.abs(advance) < .14 then advance = (human.vz or 0)*sign*.16 end
         if math.abs(advance) >= .14 and (advance > 0) ~= acrossMidfield(match,human,sign) then
             return human,advance > 0
         end
     end
+end
+
+local function requestCrossing(match,ai,team,sign)
+    if match.humans then
+        for _, id in ipairs(match.teams[team]) do
+            local input = match.humans[id]
+            if input then
+                local player, heading = humanCrossing(match,match.squad[id],team,sign,input.z)
+                if player then return player,heading end
+            end
+        end
+    else
+        local human = not match.careerWaiting and match.squad[match.controlled]
+        local player, heading = humanCrossing(match,human,team,sign,match.moveZ)
+        if player then return player,heading end
+    end
     local carrier = match.carrier and match.squad[match.carrier]
-    if carrier and carrier ~= human and carrier.team == team and carrier.role ~= "G"
+    if carrier and not humanControls(match,carrier.id) and carrier.team == team and carrier.role ~= "G"
         and math.abs(carrier.z) <= 9 then
         local target = ai.intents[carrier.id].z*sign
         if math.abs(target) > .65 and (target > 0) ~= acrossMidfield(match,carrier,sign) then
@@ -728,7 +748,7 @@ local function exchangeAtMidfield(match,ai,snapshot,team,sign)
                 local player = match.squad[id]
                 local screen = match.screen
                 if id ~= mover.id and id ~= match.carrier and player.role ~= "G"
-                    and (id ~= match.controlled or match.careerWaiting)
+                    and not humanControls(match,id)
                     and acrossMidfield(match,player,sign) == toAttack
                     and not (screen and (screen.screener == id or screen.user == id)) then
                     local cost = math.abs(player.z) + math.abs(player.x-mover.x)*.13
@@ -752,20 +772,19 @@ local function balanceMidfield(match,ai,snapshot,team)
     local sign = attackingSign(match,team)
     local exchange = exchangeAtMidfield(match,ai,snapshot,team,sign)
     local midfielders,nonMidAttack,wanted = {},0,0
-    local humanID = not match.careerWaiting and match.controlled
     for _, id in ipairs(match.teams[team]) do
         local player,intent = match.squad[id],ai.intents[id]
         local attacking = acrossMidfield(match,player,sign)
         if midfielder(player) then
             local desire = intent.z*sign > 0
-            if id == humanID or id == match.carrier then
+            if humanControls(match,id) or id == match.carrier then
                 desire = attacking
             end
             if exchange and id == exchange.mover then desire = exchange.toAttack
             elseif exchange and id == exchange.reserve then desire = not exchange.toAttack end
             if desire then wanted = wanted + 1 end
             local priority = (desire and 100 or 0) + (attacking and 6 or 0) - math.abs(player.z)*.27
-            if id == humanID or id == match.carrier then priority = priority + (desire and 180 or -180) end
+            if humanControls(match,id) or id == match.carrier then priority = priority + (desire and 180 or -180) end
             if exchange and id == exchange.reserve then priority = priority + (desire and 400 or -400) end
             midfielders[#midfielders+1] = {id=id,priority=priority}
         elseif attacking then
@@ -790,7 +809,7 @@ local function balanceMidfield(match,ai,snapshot,team)
         local id = entry.id
         local player,intent = match.squad[id],ai.intents[id]
         local front = rank <= selected
-        if id ~= match.carrier and id ~= humanID and (intent.z*sign > 0) ~= front then
+        if id ~= match.carrier and not humanControls(match,id) and (intent.z*sign > 0) ~= front then
             local depth = front and (3.3+rank*1.3) or -(3.6+rank*.8)
             local width = math.abs(player.homeX) > 1 and player.homeX*.78 or snapshot.ball.x*.35
             move(intent,width,depth*sign)

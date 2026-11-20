@@ -121,6 +121,11 @@ local function careerLock(match)
     if type(id) == "number" and match.squad[id] then return id end
 end
 
+local function humanControls(match, index)
+    if match.humans then return match.humans[index] ~= nil end
+    return index == match.controlled and not match.careerWaiting
+end
+
 local function attach(match, index, select, source)
     local player = match.squad[index]
     P.Statistics.possession(match,index)
@@ -171,8 +176,10 @@ local function startFaceoff(match)
         first.faceoffFatigue = math.max(0, first.faceoffFatigue - .15)
         second.faceoffFatigue = math.max(0, second.faceoffFatigue - .15)
     end
+    local humanDraw = not locked or locked == first.id and not match.careerWaiting
+    if match.humans then humanDraw = humanControls(match,first.id) end
     match.faceoff = P.Faceoff.new(match.rules.faceoff, first, second, match.faceoffSerial,
-        (not locked or locked == first.id and not match.careerWaiting) and 1 or false)
+        humanDraw and 1 or false)
     local reset = P.AnimationController.reset
     for _, player in ipairs(match.squad) do
         player.x, player.z = player.homeX, player.homeZ
@@ -245,6 +252,7 @@ function Match.new(scene, profile, homeId, awayId, rules)
         field=field, venueAway=rules.venueAway == true, goalsByTeam=field.goals, goal=vec3(homeGoal.x, homeGoal.top * .5, homeGoal.z),
         ball=makeBall(scene), marker=makeMarker(scene), squad={}, teams={{},{}}, keepers={}, rules=settings
     }
+    match.humans, match.playerId = rules.humans, rules.playerId
     match.statisticsOptions = rules.statistics
     match.movementProposals = {}
     local slot = rules and tonumber(rules.careerPlayerSlot)
@@ -264,13 +272,14 @@ function Match.new(scene, profile, homeId, awayId, rules)
         for slot, spec in ipairs(formation) do
             local index = #match.squad + 1
             local rig = P.Character.new(scene)
-            local custom = index==(match.careerPlayer or userPlayer)
-            local appearance = custom and profile or playerProfile(team,slot)
+            local human = match.humans and match.humans[index]
+            local custom = human or not match.humans and index==(match.careerPlayer or userPlayer)
+            local appearance = human and human.appearance or custom and profile or playerProfile(team,slot)
             local member = roster and roster[slot]
             local role = spec[1]
-            if index == match.careerPlayer and role == "M"
-                and (rules.careerPlayerRole == "LSM" or rules.careerPlayerRole == "SSDM") then
-                role = rules.careerPlayerRole
+            local chosenRole = human and human.role or index == match.careerPlayer and rules.careerPlayerRole
+            if role == "M" and (chosenRole == "LSM" or chosenRole == "SSDM") then
+                role = chosenRole
             end
             local long = role == "D" and slot-6 <= settings.maxLongPoles
                 or role == "LSM" and settings.maxLongPoles >= 4
@@ -287,6 +296,12 @@ function Match.new(scene, profile, homeId, awayId, rules)
                 attributes=P.Defense.attributes(role)
             }
             if slot == 4 then player.attributes.faceoff = .68 end
+            if human then
+                player.name = human.name or player.name
+                for key, value in pairs(human.attributes or {}) do
+                    if type(value) == "number" then player.attributes[key] = value end
+                end
+            end
             if index == match.careerPlayer then
                 player.name = rules.playerName or player.name
                 for key, value in pairs(rules.playerAttributes or {}) do
@@ -431,13 +446,15 @@ local function nextPlayer(match)
     return selected
 end
 
-function Match.command(match, action, moveX, moveZ, aim)
+function Match.command(match, action, moveX, moveZ, aim, actorId)
     if action == "reset" then
         resetMatch(match)
         return
     end
     if match.careerWaiting then return end
+    local controlled = actorId or match.controlled
     if match.phase == "FACEOFF" then
+        if match.humans and controlled ~= match.faceoff.home.id then return end
         if action == "pass" or action == "shoot" then action = "clamp" end
         if P.Faceoff.input(match.faceoff, action) and match.faceoff.phase == "SET" then
             announce(match, "FALSE START")
@@ -446,7 +463,7 @@ function Match.command(match, action, moveX, moveZ, aim)
     end
     if match.phase ~= "LIVE" then return end
 
-    local player = match.squad[match.controlled]
+    local player = match.squad[controlled]
     local holder = match.carrier and match.squad[match.carrier]
     if action == "switch" then
         if not careerLock(match) then match.controlled = nextPlayer(match) end
@@ -468,6 +485,10 @@ function Match.command(match, action, moveX, moveZ, aim)
     elseif action == "pass" then
         if not holder or holder.team ~= 1 then return end
         if player ~= holder then
+            if match.humans and humanControls(match,holder.id) then
+                if not aim then announce(match,player.name .. " CALLS FOR PASS") end
+                return
+            end
             if not aim then return startPass(match,holder,player.id) end
             return
         end
@@ -530,11 +551,14 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
     local movementIntents = {}
     local proposals = match.movementProposals
     local humanID = not match.careerWaiting and match.controlled
-    local input = distance(moveX,moveZ)
     for _, player in ipairs(match.squad) do
         local intent = P.Screens.intent(match,player.id,intents[player.id] or {})
         movementIntents[player.id] = intent
-        local human = player.id==humanID
+        local human = humanControls(match,player.id)
+        local control = match.humans and match.humans[player.id]
+        local inputX,inputZ = moveX,moveZ
+        local sprint = match.sprinting
+        if control then inputX,inputZ,sprint = control.x or 0,control.z or 0,control.sprint end
         local tx,tz = intent.x,intent.z
         local receiveX,receiveZ = P.Passing.receiveTarget(match,player.id)
         if not intent.screenControl then
@@ -544,12 +568,12 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
                 tx,tz = cut.cutX,cut.cutZ
             end
         end
-        local guided = receiveX or (cut and cut.cutID==player.id and not match.pending)
+        local guided = not match.humans and (receiveX or (cut and cut.cutID==player.id and not match.pending))
         local vx,vz = 0,0
-        if human and not intent.screenControl and (not guided or input>.12) then
-            local rate = match.sprinting and 1.18 or 1
+        if human and not intent.screenControl and (not guided or distance(inputX,inputZ)>.12) then
+            local rate = sprint and 1.18 or 1
             local pace = P.Attributes.pace(player,8.8) * (intent.screenDrag or 1)
-            vx,vz = moveX*pace*rate,-moveZ*pace*rate
+            vx,vz = inputX*pace*rate,-inputZ*pace*rate
         elseif tx and tz then
             local dx,dz = tx-player.x,tz-player.z
             local gap = distance(dx,dz)
@@ -703,8 +727,8 @@ end
 
 local function act(match, intents)
     for index, intent in pairs(intents) do
-        if index ~= match.controlled or match.careerWaiting
-            or (intent.action == "save" and index == match.careerPlayer) then
+        if not humanControls(match,index)
+            or intent.action == "save" and (match.humans or index == match.careerPlayer) then
             local player = match.squad[index]
             local action = intent.action
             if action == "pass" then
@@ -955,7 +979,7 @@ local function finishPeriod(match)
     match.phaseTime = 0
     if match.period >= match.rules.periods then
         match.phase = "FINAL"
-        P.Statistics.finalize(match)
+        P.Statistics.finalize(match,match.humans and {persist=false} or nil)
         local winner = match.homeScore > match.awayScore and match.homeTeam
             or match.awayScore > match.homeScore and match.awayTeam
         announce(match, winner and winner.name .. " WIN" or "DRAW", 3)
@@ -1083,10 +1107,27 @@ local function live(match, dt, moveX, moveZ)
     act(match, intents)
     P.Passing.scheduleCatch(match,match.flight,dt)
     if match.flight then P.Defense.prepareIntercept(match, match.flight) end
-    if match.loose and not match.careerWaiting then startScoop(match, match.squad[match.controlled]) end
+    if match.loose and not match.careerWaiting then
+        if match.humans then
+            for _, player in ipairs(match.squad) do
+                if humanControls(match,player.id) then startScoop(match,player) end
+            end
+        else
+            startScoop(match, match.squad[match.controlled])
+        end
+    end
     movePlayers(match, dt, moveX, moveZ, intents)
-    local crossing = match.positioning.blocked[match.controlled]
     local holder, offender = match.squad[match.carrier], match.squad[match.controlled]
+    if match.humans then
+        for _, player in ipairs(match.squad) do
+            local blocked = match.positioning.blocked[player.id]
+            if humanControls(match,player.id) and blocked and blocked.reason == "minimum" then
+                offender = player
+                break
+            end
+        end
+    end
+    local crossing = match.positioning.blocked[offender.id]
     if match.rules.profile ~= "arcade" and crossing and crossing.reason == "minimum"
         and holder and offender.team == holder.team and not match.careerWaiting then
         Match.recordStat(match,holder.id,"turnovers")
@@ -1136,6 +1177,10 @@ function Match.update(match, dt, moveX, moveZ)
     match.announcementTime = math.max(0, match.announcementTime - dt)
     for _, goal in ipairs(match.goalsByTeam) do P.GoalPhysics.update(goal, dt) end
     if match.phase == "FACEOFF" then
+        if match.humans then
+            local input = match.humans[match.faceoff.home.id]
+            moveX, moveZ = input and input.x or 0, input and input.z or 0
+        end
         faceoff(match, dt, moveX, moveZ)
     elseif match.phase == "LIVE" then
         local liveTime = math.min(dt, match.clock)

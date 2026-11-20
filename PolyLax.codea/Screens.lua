@@ -101,6 +101,9 @@ end
 function Screens.request(game, screenerId, userId, defenderId, options)
     if game.screen or game.phase and game.phase ~= "LIVE" then return nil, "busy" end
     options = options or {}
+    if game.humans and game.humans[screenerId] and not options.manual then
+        return nil, "human screener must set the pick"
+    end
     local screener, user = game.squad[screenerId], game.squad[userId]
     local defender = defenderId and game.squad[defenderId]
     if not screener or not user or screener == user or screener.role == "G"
@@ -169,6 +172,8 @@ function Screens.endHold(game,id,moveX,moveZ)
 end
 
 local function manualMovement(game, id)
+    local input = game.humans and game.humans[id]
+    if input then return length(input.x or 0,input.z or 0)>.25 end
     return game.controlled == id and length(game.moveX or 0, game.moveZ or 0) > .25
 end
 
@@ -205,7 +210,7 @@ function Screens.intent(game, playerId, intent)
         intent = copyIntent(intent)
         local strength = math.min(1, screen.dragTime / .20)
         intent.screenDrag = 1 - screen.dragStrength * strength
-        if game.controlled ~= playerId then
+        if game.controlled ~= playerId and not (game.humans and game.humans[playerId]) then
             if screen.escapeX then intent.x, intent.z = screen.escapeX, screen.escapeZ end
             intent.speed = (intent.speed or 7.2) * intent.screenDrag
         end

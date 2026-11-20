@@ -38,6 +38,11 @@ local function creatorFallback()
     return state.profile
 end
 
+local function creatorTeam(athlete)
+    local club = state.clubsCreator and P.Clubs.activeClub(state.clubs)
+    return P.TeamUniform.get(club and club.team or athlete.team)
+end
+
 local function clubPositionMutable()
     return not (state.clubsNet and state.clubsNet.session)
 end
@@ -76,7 +81,8 @@ local function applyCreatorProfile()
         or state.uniform
     local athlete = editingAthlete()
     if athlete then
-        uniform=P.Athlete.uniform(athlete,state.careerKit=="away")
+        local team = creatorTeam(athlete)
+        uniform=state.careerKit=="away" and team.away or team.home
         personalColors=false
     end
     local careerPosition = athlete and P.Career.positions[athlete.position]
@@ -242,6 +248,7 @@ local function finishClubEdit()
     elseif field == "EDIT_CODE" then state.clubCode = value:upper():gsub("%s+", "")
     elseif field == "EDIT_RELAY" then
         local ok, message = P.Clubs.setRelay(state.clubs,value)
+        if ok then state.clubsNet = nil end
         state.clubMessage = message or (ok and "Relay address saved")
     end
     if hideKeyboard then hideKeyboard() end
@@ -452,6 +459,7 @@ local function activePlay(page)
     if page == "TRAINING" then return state.training,P.Gameplay end
     if page == "MATCH" then return state.match, P.FullMatch end
     if page == "CAREER_GAME" then return state.careerPlay, P.FullMatch end
+    if page == "CLUB_MATCH" then return state.clubPlay, state.clubPlay.controller end
     return state.practice, P.Gameplay
 end
 
@@ -467,15 +475,95 @@ end
 
 local clubStages = {"highSchool", "college", "professional"}
 
+local function clubConnection()
+    local connection = state.clubsNet
+    local url = state.clubs.settings.relayURL
+    if not connection and url then
+        connection = P.ClubsNet.new(url)
+        state.clubsNet = connection
+    end
+    return connection
+end
+
+local function clubMember(lobby, id)
+    for _, member in ipairs(lobby.players) do
+        if member.id == id then return member end
+    end
+end
+
+local function clubOnlineRoster(connection, lobby, includeAI)
+    local rows = {}
+    local localId = connection.session.playerId
+    if includeAI then
+        local team = P.TeamUniform.get(lobby.team)
+        for slot, player in ipairs(P.League.roster(team.id)) do
+            rows[slot] = {name=player.name, number=player.number, role=player.role, kind="ai"}
+        end
+    end
+    for _, member in ipairs(lobby.players) do
+        local p = member.profile
+        rows[includeAI and member.slot or #rows+1] = {name=p.name,number=p.number,position=p.position,
+            connected=member.connected,ready=member.ready,host=member.id==lobby.hostId,online=true,
+            kind=member.id==localId and "local" or "remote"}
+    end
+    return rows
+end
+
 local function clubLayout()
     local stage = clubStages[state.clubStage or 1]
     local teams = P.Clubs.teamChoices(stage)
     local team = teams[state.clubTeam or 1]
+    local net = clubConnection()
+    local lobby = net and net.session and net.lobby
+    local canRequest = net and net.url and not net.command
+        and (not net.inFlight or net.inFlight.operation=="sync")
+    local member = lobby and clubMember(lobby,net.session.playerId)
+    local waiting = lobby and lobby.phase == "lobby"
+    local canStart = canRequest and waiting and P.ClubsNet.isHost(net) and #lobby.players==2
+    if canStart then
+        for _, p in ipairs(lobby.players) do canStart = canStart and p.ready and p.connected end
+    end
+    local message = state.clubMessage or net and net.error
+    if not message and net and net.busy and not lobby then message = "Contacting the relay" end
+    local roster = lobby and clubOnlineRoster(net,lobby,state.clubView=="ROSTER")
+    local schedule
+    if state.clubView=="SCHEDULE" then
+        schedule = P.Clubs.results(state.clubs)
+        for _, fixture in ipairs(P.Clubs.schedule(state.clubs)) do schedule[#schedule+1] = fixture end
+    end
     return P.ClubsUI.layout(state.clubView,state.clubs,{
         editing=state.clubEdit,draft=state.clubDraft,name=state.clubName,code=state.clubCode,
         relay=state.clubs.settings.relayURL,stageName=P.Career.stages[stage],teamName=team and team.name,
-        page=state.clubPage,message=state.clubMessage
+        page=state.clubPage,message=message,lobby=lobby,roster=roster,schedule=schedule,
+        canCreate=not lobby,hostEnabled=canRequest and not lobby and state.clubs.club~=nil,
+        canConnect=canRequest and not lobby and #(state.clubCode or "")==8,
+        canReady=canRequest and waiting and member~=nil,ready=member and member.ready,canStart=canStart,
+        canResume=lobby and lobby.phase=="match" and state.clubPlay~=nil
     })
+end
+
+local function clubOnlineAction(id)
+    local net = clubConnection()
+    if not net then return end
+    local result, message
+    if id == "HOST_ONLINE" or id == "CONNECT" then
+        local player = state.clubs.player
+        local appearance = P.Athlete.profile(player)
+        local profile = {id=player.id,name=P.Athlete.name(player),position=player.position,
+            appearance=appearance,attributes=player.attributes,number=appearance.NUMBER-1}
+        if id == "HOST_ONLINE" then result,message = P.ClubsNet.create(net,state.clubs.club,profile)
+        else result,message = P.ClubsNet.join(net,state.clubCode,profile) end
+    elseif id == "READY" then
+        local member = clubMember(net.lobby,net.session.playerId)
+        result,message = P.ClubsNet.ready(net,not member.ready)
+    elseif id == "START" then result,message = P.ClubsNet.start(net)
+    elseif id == "LEAVE" then result,message = P.ClubsNet.leave(net)
+    elseif id == "RESUME_MATCH" then
+        clearPlayInput()
+        navigate("CLUB_MATCH")
+        return
+    end
+    state.clubMessage = not result and message or nil
 end
 
 local function clubsTouch(touch)
@@ -508,6 +596,10 @@ local function clubsTouch(touch)
         openDevelopment(true)
     elseif id == "EDIT_NAME" or id == "EDIT_CODE" or id == "EDIT_RELAY" then
         if not showKeyboard then return end
+        if id=="EDIT_RELAY" and state.clubsNet and state.clubsNet.session then
+            state.clubMessage="Leave your room before changing relay servers"
+            return
+        end
         local value = id=="EDIT_NAME" and state.clubName or id=="EDIT_CODE" and state.clubCode
             or id=="EDIT_RELAY" and state.clubs.settings.relayURL
         state.clubEdit, state.clubDraft = id, value or ""
@@ -524,7 +616,8 @@ local function clubsTouch(touch)
         if saved then openClubs("LOBBY") end
         state.clubMessage = message
     elseif id == "PREV_PAGE" then state.clubPage = math.max(1,state.clubPage-1)
-    elseif id == "NEXT_PAGE" then state.clubPage = state.clubPage+1 end
+    elseif id == "NEXT_PAGE" then state.clubPage = state.clubPage+1
+    else clubOnlineAction(id) end
 end
 
 local function menuTouch(touch)
@@ -583,6 +676,81 @@ local function updateSprint(game, dt)
         local rate = effort and (-.36 + endurance*.1) or live and (.11+endurance*.1) or .32
         player.stamina = math.max(0, math.min(1, (player.stamina or 1) + dt * rate))
     end
+end
+
+local function updateClubs(dt)
+    local net = state.clubsNet
+    if not net then return end
+    local play, lobby = state.clubPlay, net.lobby
+    if not net.session or not lobby then
+        if state.clubs.joined then P.Clubs.joinedTeam(state.clubs,nil) end
+        state.clubPlay, state.clubResultID = nil,nil
+        if state.page=="CLUB_MATCH" then openClubs("LOBBY") end
+        P.ClubsNet.tick(net,dt)
+        return
+    end
+    if not state.clubs.joined or state.clubs.joined.code~=lobby.code then
+        local joined,message = P.Clubs.joinedTeam(state.clubs,lobby)
+        if not joined then
+            state.clubMessage=message
+            P.ClubsNet.disconnect(net)
+            return
+        end
+        if state.page=="CLUBS" and state.clubView=="JOIN" then openClubs("LOBBY") end
+    end
+
+    if lobby.phase=="match" and (not play or play.matchId~=lobby.matchId) then
+        play=P.ClubsMatch.new(configuredScene(),lobby,net.session.playerId)
+        if not play then
+            state.clubMessage="The relay did not assign two playable positions"
+            P.ClubsNet.disconnect(net)
+            return
+        end
+        play.camera=P.CameraController.new(play.scene,48)
+        P.CameraController.cycle(play.camera)
+        P.CameraController.cycle(play.camera)
+        state.clubPlay=play
+        if state.page=="CLUBS" and state.clubView=="LOBBY" then
+            clearPlayInput()
+            navigate("CLUB_MATCH")
+        end
+    end
+
+    local exchange
+    if lobby.phase=="match" and play then
+        play.game.clubsStatus = net.status=="reconnecting" and "RECONNECTING TO RELAY" or nil
+        local visible = state.page=="CLUB_MATCH"
+        local control = {x=visible and worldMoveX(play) or 0,z=visible and state.moveZ or 0,
+            sprint=visible and state.sprint~=nil}
+        if play.isHost then
+            if net.status=="connected" then
+                P.ClubsMatch.hostStep(play,dt,control,P.ClubsNet.takeInputs(net))
+            end
+            exchange={snapshot=P.ClubsMatch.snapshot(play)}
+            if net.snapshot and net.snapshot.phase=="FINAL" and net.status=="connected"
+                and (not play.nextFinish or net.clock>=play.nextFinish) then
+                local result=P.ClubsMatch.result(play)
+                if result then
+                    P.ClubsNet.finish(net,result)
+                    play.nextFinish=net.clock+1
+                end
+            end
+        else
+            P.ClubsMatch.guestStep(play,dt,net.snapshot)
+            if not net.snapshot and not play.game.clubsStatus then play.game.clubsStatus="WAITING FOR HOST" end
+            control.actions=P.ClubsMatch.takeActions(play)
+            exchange={input=control}
+        end
+    elseif lobby.phase=="final" and lobby.result then
+        if play and not play.isHost then P.ClubsMatch.guestStep(play,dt,net.snapshot) end
+        if state.clubResultID~=lobby.matchId and state.clubCheckedResultChange~=net.change then
+            state.clubCheckedResultChange=net.change
+            local ok,message=P.Clubs.recordOnline(state.clubs,lobby,lobby.result,net.session.playerId)
+            if ok then state.clubResultID=lobby.matchId end
+            state.clubMessage=message
+        end
+    end
+    P.ClubsNet.tick(net,dt,exchange)
 end
 
 local function aimGuide(play, controller, dt)
@@ -685,6 +853,7 @@ end
 function draw()
     local dt = math.max(0, math.min(DeltaTime or 1/60, .05))
     state.pageAge = state.pageAge + dt
+    updateClubs(dt)
     if isMenu(state.page) then
         P.Style.screen(state.page,menuLayout(),state.pageAge)
         return
@@ -726,26 +895,32 @@ function draw()
         local athlete = editingAthlete()
         if athlete then
             local first,last=P.Athlete.names(athlete)
+            local team=creatorTeam(athlete)
             options={athlete=true,kit=state.careerKit,first=first,last=last,
-                draft=state.careerName,part=state.careerNamePart,team=P.TeamUniform.get(athlete.team),
-                uniform=P.Athlete.uniform(athlete,state.careerKit=="away")}
+                draft=state.careerName,part=state.careerNamePart,team=team,
+                uniform=state.careerKit=="away" and team.away or team.home}
         end
         P.UI.creator(hud,selection,state.categoryIndex,selected,
             P.UI.firstOption(selection,selected),true,options)
         P.Style.fade(state.pageAge)
     else
         local play,controller=activePlay()
+        local online=state.page=="CLUB_MATCH"
         if play.presentation and drawPresentation(play,dt) then return end
         P.UI.step(hud, dt)
-        updateSprint(play.game, dt)
-        controller.update(play.game, dt, worldMoveX(play), state.moveZ)
+        if not online then
+            updateSprint(play.game, dt)
+            controller.update(play.game, dt, worldMoveX(play), state.moveZ)
+        end
         if state.page == "CAREER_GAME" and not play.saveAttempted then
             saveCareerResult(play)
         end
         if controller==P.Gameplay then updateTrainingReward(play,state.page) end
-        if controller==P.FullMatch then
-            matchPresentation(play)
-            if play.presentation and drawPresentation(play,0) then return end
+        if controller==P.FullMatch or online then
+            if not online then
+                matchPresentation(play)
+                if play.presentation and drawPresentation(play,0) then return end
+            end
             P.CameraController.match(play.camera, play.game, dt, state.aim and state.aim.shown, hud.frame)
         else
             P.CameraController.practice(play.camera, play.game, dt, state.aim and state.aim.shown, hud.frame)
@@ -767,7 +942,7 @@ function draw()
         state.nubZ=state.nubZ+(state.moveZ-state.nubZ)*nubBlend
         P.UI.practice(hud, play.game, state.nubX, state.nubZ,
             aimGuide(play, controller, dt), mode, ballEdge, passGuide(play,controller,hud))
-        P.StatsUI.drawEntry(hud,play.game)
+        if not online then P.StatsUI.drawEntry(hud,play.game) end
     end
 end
 
@@ -949,7 +1124,8 @@ local function playTouch(touch, hud)
     end
 
     if touch.state == BEGAN then
-        local stats=P.StatsUI.entry(hud,game)
+        local online=state.page=="CLUB_MATCH"
+        local stats=not online and P.StatsUI.entry(hud,game)
         if stats and P.UI.hit(stats,touch.x,touch.y) then
             if state.pick then controller.command(game,"releasepick",0,0) end
             openStats(game,state.page)
@@ -957,17 +1133,18 @@ local function playTouch(touch, hud)
         end
         if hud.pause and P.UI.hit(hud.pause,touch.x,touch.y) then
             if state.pick then controller.command(game,"releasepick",0,0) end
+            if online then openClubs("LOBBY") return end
             state.resumePage = state.page
             openMenu("PAUSE")
             return
         end
-        if P.UI.hit(hud.edit, touch.x, touch.y) then
+        if not online and P.UI.hit(hud.edit, touch.x, touch.y) then
             if state.pick then controller.command(game,"releasepick",0,0) end
             if state.page=="TRAINING" then openDevelopment()
             elseif state.page=="CAREER_GAME" then openCareer() else openCreator() end
             return
         end
-        if P.UI.hit(hud.reset, touch.x, touch.y) then
+        if not online and P.UI.hit(hud.reset, touch.x, touch.y) then
             if state.page == "CAREER_GAME" and play.recorded then return end
             P.UI.press(hud, hud.reset, touch.id)
             clearPlayInput()
@@ -1077,7 +1254,7 @@ function setup()
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "Midfield", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "MatchRules", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation", "Clubs", "ClubsUI"
+            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation", "Clubs", "ClubsUI", "ClubsMatch", "ClubsNet"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

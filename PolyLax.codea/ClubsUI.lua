@@ -73,9 +73,11 @@ local function rosterRow(member)
     end
     local number=member.number or member.jerseyNumber
     local suffix=number and ("  ·  #"..tostring(number)) or ""
-    local row=item(nil,tostring(member.name or "Player"),tostring(pos or "Unassigned")..suffix)
+    local owner=member.host and "  ·  HOST" or ""
+    local name=tostring(member.name or "Player")..(member.kind=="local" and member.online and " (You)" or "")
+    local row=item(nil,name,tostring(pos or "Unassigned")..suffix..owner)
     local source=member.kind
-    row.badge=(member.ai or source=="ai") and "AI" or source=="local" and "YOU"
+    row.badge=(member.ai or source=="ai") and "AI" or source=="local" and not member.online and "YOU"
         or member.connected==false and "OFFLINE" or member.ready and "READY" or "NOT READY"
     row.badgeActive=member.ready==true
     return row
@@ -107,7 +109,7 @@ end
 local screens = {}
 
 function screens.CLUBS(layout, data, options)
-    local club, player = data.club, data.player or {}
+    local club, player = options.lobby or data.club, data.player or {}
     local title = club and club.name or "Your club"
     local identity = P.Athlete.name(player)
     local description = club and (teamName(club.team) or "Local club").."  ·  "..identity
@@ -181,13 +183,22 @@ function screens.LOBBY(layout, data, options)
     end
     local code = lobby.code
     local description = code and code~="" and ("Invitation code   "..code) or "Connecting to the relay"
+    if lobby.phase=="final" and lobby.result then
+        description=string.format("Final score   %d–%d",lobby.result.homeScore,lobby.result.awayScore)
+    end
     clubStamp(layout,lobby.name or data.club and data.club.name or "Club Lobby",description)
     local y = layout.floor+19
-    local width = (layout.w-12)/3
-    place(layout,item("READY",options.ready and "Unready" or "Ready",nil,options.canReady==true),
-        layout.x-width-6,y,width,38)
-    place(layout,item("START","Start Game",nil,options.canStart==true,true),layout.x,y,width,38)
-    place(layout,item("LEAVE","Leave"),layout.x+width+6,y,width,38)
+    if lobby.phase=="match" then
+        place(layout,item("RESUME_MATCH","Return to Match",nil,options.canResume==true,true),layout.x,y,layout.w,38)
+    elseif lobby.phase=="final" then
+        place(layout,item("LEAVE","Leave Room"),layout.x,y,layout.w,38)
+    else
+        local width = (layout.w-12)/3
+        place(layout,item("READY",options.ready and "Unready" or "Ready",nil,options.canReady==true),
+            layout.x-width-6,y,width,38)
+        place(layout,item("START","Start Game",nil,options.canStart==true,true),layout.x,y,width,38)
+        place(layout,item("LEAVE","Leave"),layout.x+width+6,y,width,38)
+    end
     layout.floor=layout.floor+45
     pageList(layout,options.roster or lobby.members or {},rosterRow,"Waiting for players",options)
 end

@@ -45,9 +45,9 @@ end
 local function relayURL(value)
     if type(value) ~= "string" then return end
     value = value:match("^%s*(.-)%s*$"):gsub("/+$", "")
-    if #value > 256 then return end
+    if #value > 240 then return end
     local authority, path = value:match("^https://([^/]+)(.*)$")
-    if not authority or not path:match("^[A-Za-z0-9/_%.%-~]*$") then return end
+    if not authority or not path:match("^[A-Za-z0-9/_%.%-~]*$") or path:find("%.%.") then return end
     local host, port = authority:match("^([A-Za-z0-9%.%-]+):(%d+)$")
     host = host or authority:match("^([A-Za-z0-9%.%-]+)$")
     if not host or not host:match("^[A-Za-z0-9].*[A-Za-z0-9]$") then return end
@@ -111,7 +111,9 @@ end
 
 function Clubs.save(data)
     if not saveLocalData or not json or not json.encode then return false end
-    local encoded, raw = pcall(json.encode, data)
+    local stored = {version=version, player=data.player, club=data.club, settings=data.settings,
+        online=data.online}
+    local encoded, raw = pcall(json.encode, stored)
     if not encoded or type(raw) ~= "string" then return false end
     local written, result = pcall(saveLocalData, saveKey, raw)
     return written and result ~= false
@@ -128,6 +130,13 @@ function Clubs.load()
     end
 
     local data = {version=version, player=restorePlayer(saved and saved.player), settings={}}
+    if saved and type(saved.online) == "table" then
+        local online = saved.online
+        data.online = {games=integer(online.games, 0, 0, 1000000),
+            wins=integer(online.wins, 0, 0, 1000000), losses=integer(online.losses, 0, 0, 1000000),
+            ties=integer(online.ties, 0, 0, 1000000),
+            history=type(online.history) == "table" and copy(online.history) or {}}
+    end
     if saved and type(saved.settings) == "table" then
         data.settings.relayURL = relayURL(saved.settings.relayURL)
     end
@@ -164,7 +173,7 @@ function Clubs.savePlayer(data, player)
     if club and (player.team ~= club.team or player.stage ~= club.stage or player.season ~= club.season) then
         return false
     end
-    local candidate = {version=version, player=player, club=club, settings=data.settings}
+    local candidate = {player=player, club=club, settings=data.settings, online=data.online}
     if not Clubs.save(candidate) then return false end
     replace(data.player, player)
     return true
@@ -174,7 +183,7 @@ local function placePlayer(data, club, stage, team)
     local player = copy(data.player)
     local season = club and club.season or player.season
     player.stage, player.team, player.season = stage, team, season
-    local candidate = {version=version, player=player, club=club, settings=data.settings}
+    local candidate = {player=player, club=club, settings=data.settings, online=data.online}
     if not Clubs.save(candidate) then return false, "Could not save the club" end
     data.club = club
     replace(data.player, player)
@@ -206,11 +215,120 @@ function Clubs.setTeam(data, stage, team)
     return placePlayer(data, club, stage, team)
 end
 
+function Clubs.activeClub(data)
+    return data.joined or data.club
+end
+
+local function assignedClub(lobby)
+    if type(lobby) ~= "table" or not P.Career.stages[lobby.stage] or not teamFor(lobby.stage, lobby.team) then return end
+    if type(lobby.code) ~= "string" or not lobby.code:match("^[A-Z0-9]+$") or #lobby.code ~= 8 then return end
+    local name = clean(lobby.name, Clubs.nameLimit)
+    if name ~= "" then
+        return {code=lobby.code, name=name, stage=lobby.stage, team=lobby.team, season=1}
+    end
+end
+
+function Clubs.joinedTeam(data, lobby)
+    if lobby == nil then data.joined = nil return true end
+    local remote = assignedClub(lobby)
+    if not remote then return false, "The relay returned an invalid team" end
+    local localClub = data.club
+    if localClub and localClub.stage == remote.stage and localClub.team == remote.team then
+        remote.season = localClub.season
+    end
+    -- Room membership is session-only. Keep the saved club and athlete intact.
+    data.joined = remote
+    return true
+end
+
 function Clubs.schedule(data)
-    if not data.club then return {} end
-    local club = data.club
+    local club = Clubs.activeClub(data)
+    if not club then return {} end
     -- Preview the league's real fixture ordering with a Club-only season seed.
     return P.CareerSeason.schedule({stage=club.stage, team=club.team, season=club.season, entries={}})
+end
+
+local function statValue(key, value)
+    if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then return 0 end
+    if key == "screenCoachPoints" then return math.max(-1000, math.min(1000, value)) end
+    value = math.max(0, math.min(1000, value))
+    if key == "minutesPlayed" or key == "penaltyMinutes" then return value end
+    if key == "gamesPlayed" or key == "gamesStarted" then return math.min(1, math.floor(value)) end
+    return math.floor(value)
+end
+
+local function onlineRecord(result, remote, matchId, stats, earned)
+    local opponent = result.opponent
+    if not teamFor(remote.stage, opponent) then
+        local school = P.SchoolTeams.get(opponent)
+        if not school or P.League.profile(remote.stage, opponent).id ~= P.League.profile(remote.stage, remote.team).id then
+            opponent = nil
+        end
+    end
+    return {id=matchId, label="Clubs match", code=remote.code, name=remote.name, stage=remote.stage,
+        team=remote.team, opponentId=opponent, opponent=opponent and P.TeamUniform.get(opponent).name or "Opponent", home=true,
+        homeScore=result.homeScore, awayScore=result.awayScore, result=string.format("%d–%d",result.homeScore,result.awayScore),
+        xp=earned, stats=stats}
+end
+
+function Clubs.results(data)
+    local played = data.online and data.online.history or {}
+    local results = {}
+    for index=#played,1,-1 do results[#results+1] = played[index] end
+    return results
+end
+
+-- Invoke only with the authenticated final returned by the relay. A repeated
+-- result is acknowledged without changing the player, wallet, or record.
+function Clubs.recordOnline(data, lobby, result, memberId)
+    local remote = assignedClub(lobby)
+    if not remote or lobby.phase ~= "final" or type(result) ~= "table" then
+        return false, "No completed Clubs match"
+    end
+    local id = result.matchId
+    if id ~= lobby.matchId or type(id) ~= "string" or #id > 72 or not id:match("^[A-Za-z0-9_%-]+$") then
+        return false, "The result does not match this room"
+    end
+    local player = data.player
+    local member
+    if type(memberId) ~= "string" or type(lobby.players) ~= "table" then return false, "Missing Clubs player" end
+    for _, row in ipairs(lobby.players) do
+        if type(row) == "table" and row.id == memberId and type(row.profile) == "table"
+            and row.profile.id == player.id then member = row break end
+    end
+    if not member then return false, "The result is for another player" end
+    local key = "club:"..id
+    if player.entries[key] then return true, nil, false end
+    local score, opposing = result.homeScore, result.awayScore
+    if type(score) ~= "number" or type(opposing) ~= "number" or score % 1 ~= 0 or opposing % 1 ~= 0
+        or score < 0 or opposing < 0 or score > 999 or opposing > 999 then
+        return false, "The relay returned an invalid score"
+    end
+    local actual = type(result.stats) == "table" and result.stats[memberId]
+    if type(actual) ~= "table" then return false, "Your athlete's statistics are missing" end
+
+    local candidate = copy(data)
+    local updated = candidate.player
+    local personal = {screenCoachPoints=statValue("screenCoachPoints", actual.screenCoachPoints)}
+    for _, stat in ipairs(P.Career.statKeys) do personal[stat] = statValue(stat, actual[stat]) end
+    for stat, value in pairs(personal) do updated.stats[stat] = (updated.stats[stat] or 0) + value end
+    local bucket = score > opposing and "wins" or score < opposing and "losses" or "ties"
+    updated.games, updated[bucket] = updated.games + 1, updated[bucket] + 1
+    local earned = 20 + (bucket == "wins" and 10 or 0) + personal.goals * 6 + personal.assists * 5
+        + personal.saves * 3 + personal.faceoffs * 4 + personal.groundBalls * 2
+        + personal.causedTurnovers * 4 + personal.interceptions * 3
+    updated.xp = updated.xp + earned
+    P.Development.onMatch(updated, {id=key}, personal, {phase="FINAL",homeScore=score,awayScore=opposing})
+    local record = onlineRecord(result, remote, id, personal, earned)
+    updated.entries[key] = {home=score, away=opposing, opponent=record.opponentId, stats=personal, xp=earned}
+    local online = candidate.online or {games=0,wins=0,losses=0,ties=0,history={}}
+    online.games, online[bucket] = online.games + 1, online[bucket] + 1
+    online.history[#online.history+1] = record
+    candidate.online = online
+    if not Clubs.save(candidate) then return false, "Could not save the match result" end
+    replace(player, updated)
+    data.online = online
+    return true, nil, true
 end
 
 function Clubs.roster(data)
