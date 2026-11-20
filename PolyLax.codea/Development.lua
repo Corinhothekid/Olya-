@@ -66,8 +66,9 @@ function Development.claimed(career, key)
     return saved ~= nil and type(saved.claims) == "table" and saved.claims[key] == true
 end
 
-local function commit(career, candidate)
-    if not P.Career.save(candidate) then return false, "Could not save development" end
+local function commit(career, candidate, save)
+    save = save or P.Career.save
+    if not save(candidate) then return false, "Could not save development" end
     for key, value in pairs(candidate) do career[key] = value end
     return true
 end
@@ -145,7 +146,7 @@ function Development.reward(career, key, xp, bonus)
     return true, string.format("+%d XP  ·  +%d skill points", gainedXP, gainedXP + bonus)
 end
 
-function Development.upgrade(career, key)
+function Development.upgrade(career, key, save)
     local attributes = P.Attributes
     local nextValue, cost = attributes.advance(career.attributes, key, career.position)
     if not nextValue then return false, "Skill is capped or unavailable" end
@@ -156,7 +157,7 @@ function Development.upgrade(career, key)
     candidate.attributes[key] = nextValue
     state.points, state.spent = state.points - cost, count(state.spent + cost)
     candidate.development = state
-    local ok, message = commit(career, candidate)
+    local ok, message = commit(career, candidate, save)
     if not ok then return false, message end
     for _, descriptor in ipairs(attributes.descriptors) do
         if descriptor.key == key then
@@ -289,7 +290,7 @@ function Development.draw(career, hud, message)
     button(style,hud.previous,false)
     button(style,hud.next,false)
     label(string.format("%d / %d",hud.page,hud.pages),hud.x,hud.previous.y,12,palette.muted)
-    button(style,hud.drill,true)
+    if hud.drill then button(style,hud.drill,true) end
     popMatrix()
     popStyle()
 end

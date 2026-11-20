@@ -90,13 +90,14 @@ function Athlete.canChange(career, locked)
     return not locked and career.stage == "highSchool" and (career.games or 0) == 0
 end
 
-function Athlete.categories(career, locked)
+function Athlete.categories(career, locked, positionMutable)
     local base = {}
     for _, category in ipairs(P.Profile.categories) do base[category.key] = category end
     local positions, positionValues = {}, {}
     local mutable = Athlete.canChange(career, locked)
+    if positionMutable == nil then positionMutable = mutable end
     for index, position in ipairs(P.Career.positions) do
-        if mutable or index == career.position then
+        if positionMutable or index == career.position then
             positions[#positions + 1], positionValues[#positionValues + 1] = position.label, index
         end
     end
@@ -148,8 +149,9 @@ local function draft(career, fallback)
     return candidate
 end
 
-local function commit(career, candidate)
-    if not P.Career.save(candidate) then return false, "Could not save appearance" end
+local function commit(career, candidate, save)
+    save = save or P.Career.save
+    if not save(candidate) then return false, "Could not save appearance" end
     for key in pairs(career) do
         if candidate[key] == nil then career[key] = nil end
     end
@@ -157,25 +159,25 @@ local function commit(career, candidate)
     return true
 end
 
-function Athlete.ensure(career, fallback)
+function Athlete.ensure(career, fallback, save)
     if storedAppearance(career).schema == appearanceSchema then
         career.name = Athlete.name(career)
         return true
     end
-    return commit(career, draft(career, fallback))
+    return commit(career, draft(career, fallback), save)
 end
 
-function Athlete.rename(career, fallback, part, value)
+function Athlete.rename(career, fallback, part, value, save)
     if part ~= "first" and part ~= "last" then return false end
     local clean = cleanName(value)
     if part == "first" and clean == "" then return false, "Enter a first name" end
     local candidate = draft(career, fallback)
     candidate.appearance[part == "first" and "firstName" or "lastName"] = clean
     candidate.name = Athlete.name(candidate)
-    return commit(career, candidate)
+    return commit(career, candidate, save)
 end
 
-function Athlete.select(career, fallback, category, index, locked)
+function Athlete.select(career, fallback, category, index, locked, save, positionMutable)
     index = option(index, #category.choices)
     if not index or category.key == "IDENTITY" then return false end
     local key = category.key
@@ -183,11 +185,20 @@ function Athlete.select(career, fallback, category, index, locked)
     if key == "POSITION" or key == "TEAM" then
         local value = category.values and category.values[index]
         if not value then return false end
-        if not Athlete.canChange(career, locked) then
+        local mutable = Athlete.canChange(career, locked)
+        if key == "POSITION" and positionMutable ~= nil then mutable = positionMutable end
+        if not mutable then
             return false, key == "TEAM" and "Team changes follow recruiting" or "Position is locked"
         end
         if key == "POSITION" then
-            if value == career.position then return Athlete.ensure(career, fallback) end
+            if value == career.position then return Athlete.ensure(career, fallback, save) end
+            if save then
+                candidate.position = value
+                if not career.development or (career.development.spent or 0) == 0 then
+                    candidate.attributes = P.Attributes.forPosition(value)
+                end
+                return commit(career, candidate, save)
+            end
             if not P.Career.setPosition(candidate, value) then return false, "Could not save position" end
             for name, item in pairs(candidate) do career[name] = item end
             return true
@@ -202,7 +213,7 @@ function Athlete.select(career, fallback, category, index, locked)
     else
         return false
     end
-    return commit(career, candidate)
+    return commit(career, candidate, save)
 end
 
 function Athlete.uniform(career, isAway)

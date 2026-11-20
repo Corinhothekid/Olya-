@@ -24,9 +24,30 @@ local function pedestal(scene, width, height, depth, y, tint)
     entity.material.diffuse = tint
 end
 
+local function editingAthlete()
+    if state.clubsCreator then return state.clubs.player end
+    if state.careerCreator then return state.career end
+end
+
+local function saveClubPlayer(candidate)
+    return P.Clubs.savePlayer(state.clubs,candidate)
+end
+
+local function creatorFallback()
+    if state.clubsCreator then return nil end
+    return state.profile
+end
+
+local function clubPositionMutable()
+    return not (state.clubsNet and state.clubsNet.session)
+end
+
 local function creatorCategories()
-    if state.careerCreator then
-        return P.Athlete.categories(state.career,state.careerPlay~=nil)
+    local athlete = editingAthlete()
+    if state.clubsCreator then
+        return P.Athlete.categories(athlete,true,clubPositionMutable())
+    elseif athlete then
+        return P.Athlete.categories(athlete,state.careerPlay~=nil)
     end
     return P.Profile.categories
 end
@@ -36,13 +57,15 @@ local function category()
 end
 
 local function creatorProfile()
-    if state.careerCreator then return P.Athlete.profile(state.career,state.profile) end
+    local athlete = editingAthlete()
+    if athlete then return P.Athlete.profile(athlete,creatorFallback()) end
     return state.profile
 end
 
 local function creatorSelection()
     local selected, profile=category(),creatorProfile()
-    if state.careerCreator then return P.Athlete.choice(state.career,profile,selected) end
+    local athlete = editingAthlete()
+    if athlete then return P.Athlete.choice(athlete,profile,selected) end
     return profile[selected.key]
 end
 
@@ -51,11 +74,12 @@ local function applyCreatorProfile()
     local personalColors=selected=="HELMET" or selected=="GLOVES" or selected=="SHORTS"
     local uniform=selected=="OPPONENT" and P.TeamUniform.opponent(state.uniform,state.profile.OPPONENT)
         or state.uniform
-    if state.careerCreator then
-        uniform=P.Athlete.uniform(state.career,state.careerKit=="away")
+    local athlete = editingAthlete()
+    if athlete then
+        uniform=P.Athlete.uniform(athlete,state.careerKit=="away")
         personalColors=false
     end
-    local careerPosition = state.careerCreator and P.Career.positions[state.career.position]
+    local careerPosition = athlete and P.Career.positions[athlete.position]
     local long = careerPosition and (careerPosition.slot == 7 or careerPosition.role == "LSM")
     P.Character.setStickType(state.creator.rig,long and "long" or "short")
     P.Character.apply(state.creator.rig,creatorProfile(),selected,uniform,personalColors)
@@ -71,12 +95,23 @@ local function openMenu(page)
     navigate(page)
 end
 
+local function openClubs(view)
+    state.clubs = state.clubs or P.Clubs.load()
+    state.clubView, state.clubPage = view or "CLUBS", 1
+    state.clubEdit, state.clubMessage = nil, nil
+    openMenu("CLUBS")
+end
+
 local function openCreator(athlete, section)
-    if state.careerCreator~=athlete then state.categoryIndex=4 end
-    state.careerCreator=athlete
+    if state.creatorMode~=athlete then state.categoryIndex=4 end
+    state.creatorMode = athlete
+    state.careerCreator, state.clubsCreator = athlete == true, athlete == "clubs"
     state.careerKit="home"
     if section then state.categoryIndex=section end
-    if athlete then P.Athlete.ensure(state.career,state.profile) end
+    local profile = editingAthlete()
+    if profile then
+        P.Athlete.ensure(profile,creatorFallback(),state.clubsCreator and saveClubPlayer or nil)
+    end
     if not state.creator then
         local scene = configuredScene()
         local rig = P.Character.new(scene)
@@ -185,8 +220,9 @@ end
 local function finishName()
     if not state.careerName then return end
     if state.careerNamePart then
-        P.Athlete.rename(state.career,state.profile,state.careerNamePart,state.careerName)
-        local play=state.careerPlay
+        P.Athlete.rename(editingAthlete(),creatorFallback(),state.careerNamePart,state.careerName,
+            state.clubsCreator and saveClubPlayer or nil)
+        local play=state.careerCreator and state.careerPlay
         if play then
             local player=play.game.squad[play.game.careerPlayer]
             player.name=P.Athlete.name(state.career)
@@ -198,8 +234,35 @@ local function finishName()
     if hideKeyboard then hideKeyboard() end
 end
 
+local function finishClubEdit()
+    local field, value = state.clubEdit, state.clubDraft
+    if not field then return end
+    state.clubEdit, state.clubDraft = nil, nil
+    if field == "EDIT_NAME" then state.clubName = value
+    elseif field == "EDIT_CODE" then state.clubCode = value:upper():gsub("%s+", "")
+    elseif field == "EDIT_RELAY" then
+        local ok, message = P.Clubs.setRelay(state.clubs,value)
+        state.clubMessage = message or (ok and "Relay address saved")
+    end
+    if hideKeyboard then hideKeyboard() end
+end
+
 function keyboard(key)
-    if not state or not state.careerName then return end
+    if not state then return end
+    if state.clubEdit then
+        if key == RETURN or key == "\n" then
+            finishClubEdit()
+        elseif key == BACKSPACE or key == "\b" then
+            local value = state.clubDraft
+            local last = utf8 and utf8.offset(value,-1) or #value
+            state.clubDraft = value:sub(1,math.max(0,(last or 1)-1))
+        elseif type(key) == "string" and not key:match("[%c]") then
+            local limit = state.clubEdit == "EDIT_RELAY" and 160 or state.clubEdit == "EDIT_CODE" and 12 or 40
+            if #state.clubDraft+#key <= limit then state.clubDraft = state.clubDraft..key end
+        end
+        return
+    end
+    if not state.careerName then return end
     if key == RETURN or key == "\n" then
         finishName()
     elseif key == BACKSPACE or key == "\b" then
@@ -215,10 +278,25 @@ local function careerLayout()
         state.careerSkill,state.careerPage,state.careerStatMode,state.awardState)
 end
 
-local function openDevelopment()
+local function openDevelopment(clubs)
     clearPlayInput()
-    navigate("DEVELOPMENT")
-    state.developmentPage=state.developmentPage or 1
+    if clubs then
+        navigate("CLUB_DEVELOPMENT")
+        state.clubDevelopmentPage=state.clubDevelopmentPage or 1
+    else
+        navigate("DEVELOPMENT")
+        state.developmentPage=state.developmentPage or 1
+    end
+end
+
+local function developmentLayout()
+    if state.page == "CLUB_DEVELOPMENT" then
+        local profile = state.clubs.player
+        local layout = P.Development.layout(profile,state.clubDevelopmentPage)
+        layout.drill = nil
+        return layout, profile, state.clubDevelopmentMessage
+    end
+    return P.Development.layout(state.career,state.developmentPage), state.career, state.developmentMessage
 end
 
 local function trainingKey(mode)
@@ -274,16 +352,23 @@ end
 
 local function developmentTouch(touch)
     if touch.state~=BEGAN then return end
-    local l=P.Development.layout(state.career,state.developmentPage)
+    local l, player=developmentLayout()
+    local clubs = state.page=="CLUB_DEVELOPMENT"
+    local pageKey = clubs and "clubDevelopmentPage" or "developmentPage"
     local function hit(item) return item and item.enabled~=false and P.UI.hit(item,touch.x,touch.y) end
-    if hit(l.back) then openCareer()
-    elseif hit(l.previous) then state.developmentPage=l.page-1
-    elseif hit(l.next) then state.developmentPage=l.page+1
+    if hit(l.back) then
+        if clubs then openClubs() else openCareer() end
+    elseif hit(l.previous) then state[pageKey]=l.page-1
+    elseif hit(l.next) then state[pageKey]=l.page+1
     elseif hit(l.drill) then openTraining()
     else
         for _,row in ipairs(l.rows) do
             if hit(row.upgrade) then
-                local saved,message=P.Development.upgrade(state.career,row.upgrade.id)
+                local saved,message=P.Development.upgrade(player,row.upgrade.id,clubs and saveClubPlayer or nil)
+                if clubs then
+                    state.clubDevelopmentMessage = message
+                    return
+                end
                 state.developmentMessage=message
                 if saved then
                     for _,play in ipairs({state.careerPlay or false,state.training or false}) do
@@ -380,6 +465,68 @@ local function menuLayout()
         statsEnabled=play and play.game.statistics~=nil})
 end
 
+local clubStages = {"highSchool", "college", "professional"}
+
+local function clubLayout()
+    local stage = clubStages[state.clubStage or 1]
+    local teams = P.Clubs.teamChoices(stage)
+    local team = teams[state.clubTeam or 1]
+    return P.ClubsUI.layout(state.clubView,state.clubs,{
+        editing=state.clubEdit,draft=state.clubDraft,name=state.clubName,code=state.clubCode,
+        relay=state.clubs.settings.relayURL,stageName=P.Career.stages[stage],teamName=team and team.name,
+        page=state.clubPage,message=state.clubMessage
+    })
+end
+
+local function clubsTouch(touch)
+    local id = P.ClubsUI.touch(clubLayout(),touch)
+    if not id then return end
+    local view = state.clubView
+    finishClubEdit()
+    if id == "BACK" then
+        if view == "CLUBS" or view == "SETTINGS" then openMenu("FRONT") else openClubs() end
+    elseif id == "CREATE" then
+        local saved = state.clubs.club
+        state.clubName = saved and saved.name or ""
+        state.clubStage, state.clubTeam = 1, 1
+        if saved then
+            for i, stage in ipairs(clubStages) do
+                if stage == saved.stage then state.clubStage = i end
+            end
+            for i, team in ipairs(P.Clubs.teamChoices(clubStages[state.clubStage])) do
+                if team.id == saved.team then state.clubTeam = i end
+            end
+        end
+        openClubs("CREATE")
+    elseif id == "JOIN" or id == "ROSTER" or id == "SCHEDULE" or id == "LOBBY" then
+        openClubs(id)
+    elseif id == "MY_PLAYER" then
+        openCreator("clubs",1)
+    elseif id == "CREATOR" then
+        openCreator()
+    elseif id == "DEVELOPMENT" then
+        openDevelopment(true)
+    elseif id == "EDIT_NAME" or id == "EDIT_CODE" or id == "EDIT_RELAY" then
+        if not showKeyboard then return end
+        local value = id=="EDIT_NAME" and state.clubName or id=="EDIT_CODE" and state.clubCode
+            or id=="EDIT_RELAY" and state.clubs.settings.relayURL
+        state.clubEdit, state.clubDraft = id, value or ""
+        showKeyboard()
+    elseif id == "NEXT_STAGE" then
+        state.clubStage, state.clubTeam = (state.clubStage or 1)%#clubStages+1,1
+    elseif id == "NEXT_TEAM" then
+        local count = #P.Clubs.teamChoices(clubStages[state.clubStage or 1])
+        if count > 0 then state.clubTeam = (state.clubTeam or 1)%count+1 end
+    elseif id == "SAVE_CLUB" then
+        local stage = clubStages[state.clubStage or 1]
+        local team = P.Clubs.teamChoices(stage)[state.clubTeam or 1]
+        local saved, message = P.Clubs.create(state.clubs,state.clubName,stage,team and team.id)
+        if saved then openClubs("LOBBY") end
+        state.clubMessage = message
+    elseif id == "PREV_PAGE" then state.clubPage = math.max(1,state.clubPage-1)
+    elseif id == "NEXT_PAGE" then state.clubPage = state.clubPage+1 end
+end
+
 local function menuTouch(touch)
     if touch.state ~= BEGAN then return end
     for _,button in ipairs(menuLayout().buttons) do
@@ -387,6 +534,8 @@ local function menuTouch(touch)
             local id = button.id
             if id=="CREATOR" then openCreator(state.page=="PAUSE" and state.resumePage=="CAREER_GAME" or nil)
             elseif id=="CAREER" then openCareer()
+            elseif id=="CLUBS" then openClubs()
+            elseif id=="SETTINGS" then openClubs("SETTINGS")
             elseif id=="PRACTICE" or id=="MATCH" then openPlay(id)
             elseif id=="MODES" or id=="HOME" then openMenu(id=="HOME" and "FRONT" or id)
             elseif id=="RESUME" and state.resumePage then navigate(state.resumePage)
@@ -477,7 +626,7 @@ local function currentHUDLayout()
         state.width, state.height = WIDTH, HEIGHT
         local play = state.page ~= "CREATOR" and activePlay()
         state.layout = state.page == "CREATOR" and
-            P.UI.creatorLayout(creatorCategories(), {athlete=state.careerCreator,kit=state.careerKit})
+            P.UI.creatorLayout(creatorCategories(), {athlete=editingAthlete()~=nil,kit=state.careerKit})
             or P.UI.practiceLayout(play and play.game.positioning ~= nil)
     end
     return state.layout
@@ -540,14 +689,19 @@ function draw()
         P.Style.screen(state.page,menuLayout(),state.pageAge)
         return
     end
+    if state.page=="CLUBS" then
+        P.ClubsUI.draw(clubLayout())
+        P.Style.fade(state.pageAge)
+        return
+    end
     if state.page=="STATS" then
         P.StatsUI.draw(P.StatsUI.layout(state.statView))
         P.Style.fade(state.pageAge)
         return
     end
-    if state.page=="DEVELOPMENT" then
-        local l=P.Development.layout(state.career,state.developmentPage)
-        P.Development.draw(state.career,l,state.developmentMessage)
+    if state.page=="DEVELOPMENT" or state.page=="CLUB_DEVELOPMENT" then
+        local l, player, message = developmentLayout()
+        P.Development.draw(player,l,message)
         P.Style.fade(state.pageAge)
         return
     end
@@ -569,11 +723,12 @@ function draw()
         creator.scene:draw()
         local selected=creatorSelection()
         local options
-        if state.careerCreator then
-            local first,last=P.Athlete.names(state.career)
+        local athlete = editingAthlete()
+        if athlete then
+            local first,last=P.Athlete.names(athlete)
             options={athlete=true,kit=state.careerKit,first=first,last=last,
-                draft=state.careerName,part=state.careerNamePart,team=P.TeamUniform.get(state.career.team),
-                uniform=P.Athlete.uniform(state.career,state.careerKit=="away")}
+                draft=state.careerName,part=state.careerNamePart,team=P.TeamUniform.get(athlete.team),
+                uniform=P.Athlete.uniform(athlete,state.careerKit=="away")}
         end
         P.UI.creator(hud,selection,state.categoryIndex,selected,
             P.UI.firstOption(selection,selected),true,options)
@@ -618,19 +773,24 @@ end
 
 local function updateChoice(index)
     local selection = category()
-    if state.careerCreator then
+    local athlete = editingAthlete()
+    if athlete then
         if selection.key=="IDENTITY" then
             if not showKeyboard then return end
             finishName()
-            local first,last=P.Athlete.names(state.career)
+            local first,last=P.Athlete.names(athlete)
             state.careerNamePart=index==1 and "first" or "last"
             state.careerName=index==1 and first or last
             showKeyboard()
             return
         end
-        P.Athlete.select(state.career,state.profile,selection,index,state.careerPlay~=nil)
+        if state.clubsCreator then
+            P.Athlete.select(athlete,nil,selection,index,true,saveClubPlayer,clubPositionMutable())
+        else
+            P.Athlete.select(athlete,state.profile,selection,index,state.careerPlay~=nil)
+        end
         applyCreatorProfile()
-        if state.careerPlay then
+        if state.careerCreator and state.careerPlay then
             P.FullMatch.applyProfile(state.careerPlay.game,P.Athlete.profile(state.career,state.profile))
         end
         return
@@ -652,10 +812,12 @@ local function creatorTouch(touch, hud)
     if touch.state == BEGAN then
         if hud.home and P.UI.hit(hud.home,touch.x,touch.y) then
             finishName()
-            if state.careerCreator then openCareer() else openMenu("FRONT") end
+            if state.clubsCreator then openClubs()
+            elseif state.careerCreator then openCareer()
+            else openMenu("FRONT") end
             return
         end
-        if not state.careerCreator and P.UI.hit(hud.career, touch.x, touch.y) then
+        if not editingAthlete() and P.UI.hit(hud.career, touch.x, touch.y) then
             openCareer()
             return
         end
@@ -663,7 +825,7 @@ local function creatorTouch(touch, hud)
         local awayKit=P.UI.hit(hud.fullGame,touch.x,touch.y)
         if homeKit or awayKit then
             finishName()
-            if state.careerCreator then
+            if editingAthlete() then
                 state.careerKit=homeKit and "home" or "away"
                 applyCreatorProfile()
             else openPlay(homeKit and "PRACTICE" or "MATCH") end
@@ -877,11 +1039,13 @@ function touched(touch)
     if not state then return end
     if isMenu(state.page) then
         menuTouch(touch)
+    elseif state.page == "CLUBS" then
+        clubsTouch(touch)
     elseif state.page == "CREATOR" then
         creatorTouch(touch, currentHUDLayout())
     elseif state.page == "CAREER" then
         careerTouch(touch)
-    elseif state.page=="DEVELOPMENT" then
+    elseif state.page=="DEVELOPMENT" or state.page=="CLUB_DEVELOPMENT" then
         developmentTouch(touch)
     elseif state.page=="STATS" then
         statTouch(touch)
@@ -906,14 +1070,14 @@ function setup()
     startupError = nil
     runChecked("PolyLax could not start", function()
         assert(type(runSetup) == "function" and type(runFrame) == "function",
-            "Install the complete PolyLax 3.0 Main tab.")
+            "Install the complete PolyLax 3.1 Main tab.")
         local modules = PolyLax or {}
         local missing = {}
         for _, name in ipairs({
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "Midfield", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "MatchRules", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation"
+            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation", "Clubs", "ClubsUI"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

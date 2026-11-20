@@ -63,14 +63,15 @@ end
 
 local choices = {
     FRONT = {
-        {id="MODES", title="Play", detail="Choose practice or full match", prominent=true},
-        {id="CAREER", title="Road to the Pros", detail="Develop your athlete through seasons"},
-        {id="CREATOR", title="Player Creator", detail="Customize your player and equipment"}
+        {id="MODES", title="Quick Play", detail="Practice or play a full match", prominent=true},
+        {id="CAREER", title="Be a Pro", detail="Develop your single-player career"},
+        {id="CLUBS", title="PolyLax Clubs", detail="Manage your club and athlete", icon="clubs"},
+        {id="SETTINGS", title="Settings", detail="Player Creator and online connection"}
     },
     MODES = {
         {id="PRACTICE", title="Practice", detail="Six-player offense and shooting", prominent=true},
         {id="MATCH", title="Full Match", detail="Twenty-player field lacrosse"},
-        {id="CAREER", title="Road to the Pros", detail="Continue your career"},
+        {id="CAREER", title="Be a Pro", detail="Continue your career"},
         {id="HOME", title="Home"}
     },
     PAUSE = {
@@ -84,7 +85,7 @@ local choices = {
 
 local function hitbox(id, x, y, w, h, choice, enabled)
     return {id=id,x=x,y=y,w=w,h=h,label=choice.title,detail=choice.detail,
-        prominent=choice.prominent,enabled=enabled}
+        prominent=choice.prominent,icon=choice.icon,enabled=enabled}
 end
 
 function Style.screenLayout(page, options)
@@ -161,20 +162,40 @@ local function fieldMarks(l)
     noStroke()
 end
 
+function Style.clubsIcon(x, y, size, tint)
+    local radius = size * .095
+    ellipseMode(CENTER)
+    fill(tint)
+    noStroke()
+    ellipse(x, y+size*.16, radius*2.2)
+    ellipse(x-size*.21, y+size*.08, radius*2)
+    ellipse(x+size*.21, y+size*.08, radius*2)
+    Style.rounded(x, y-size*.12, size*.27, size*.22, size*.065, tint)
+    Style.rounded(x-size*.22, y-size*.17, size*.14, size*.16, size*.046, tint)
+    Style.rounded(x+size*.22, y-size*.17, size*.14, size*.16, size*.046, tint)
+end
+
 local function drawButton(l, item)
     local motion = l.motion[item]
     local s = 1-.035*(motion and motion.amount or 0)
     local colorTop = item.prominent and blueTop or item.enabled and palette.body or disabledCard
-    local colorRim = item.prominent and palette.glow or item.enabled and palette.steel or palette.inset
+    local colorRim = item.prominent and palette.glow or item.icon and palette.rim
+        or item.enabled and palette.steel or palette.inset
     local x,y,w,h = item.x,item.y,item.w,item.h
     Style.rounded(x,y-3,w,h,13,cardShadow,s)
     Style.rounded(x,y,w,h,13,colorRim,s)
     Style.rounded(x,y,w-2,h-2,12,colorTop,s)
     if item.prominent then Style.rounded(x-w*.5+12,y,3,h*.54,1.5,palette.glow) end
     local left = x-w*.5+23
+    local maxLabelWidth = w-75
+    if item.icon == "clubs" then
+        Style.rounded(left+6,y,37,37,10,palette.inset)
+        Style.clubsIcon(left+6,y,36,palette.glow)
+        left,maxLabelWidth = left+33,maxLabelWidth-33
+    end
     local fg = item.enabled and palette.white or disabled
-    label(item.label,left,y+(item.detail and 9 or 0),item.prominent and 19 or 16,fg,true,w-75)
-    if item.detail then label(item.detail,left,y-12,11,item.prominent and palette.white or palette.muted,true,w-75) end
+    label(item.label,left,y+(item.detail and 9 or 0),item.prominent and 19 or 16,fg,true,maxLabelWidth)
+    if item.detail then label(item.detail,left,y-12,11,item.prominent and palette.white or palette.muted,true,maxLabelWidth) end
     if item.enabled then
         local arrowX = x+w*.5-18
         stroke(item.prominent and palette.white or palette.glow)

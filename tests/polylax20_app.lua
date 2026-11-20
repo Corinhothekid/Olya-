@@ -27,7 +27,9 @@ end
 setup(); draw()
 local s=assert(up(up(draw,'runFrame'),'state'))
 assert(s.page=='FRONT')
-tap(button(s.page,'CREATOR')); draw()
+tap(button(s.page,'SETTINGS')); draw()
+assert(s.page=='CLUBS' and s.clubView=='SETTINGS')
+tap(PolyLax.ClubsUI.layout('SETTINGS',s.clubs).byId.CREATOR); draw()
 assert(s.page=='CREATOR' and s.creator.rig.root.active)
 local rig=s.creator.rig.root
 for i=1,#PolyLax.Profile.categories do
