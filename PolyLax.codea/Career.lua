@@ -13,12 +13,12 @@ local statKeys = {"goals","assists","points","saves","goalsAllowed","shotsFaced"
 Career.statKeys = statKeys
 
 Career.positions = {
-    {label="Attack", slot=1, attributes={shooting=68, ballSecurity=67, speed=69, strength=64}},
+    {label="Attack (ATT)", slot=1, attributes={shooting=68, ballSecurity=67, speed=69, strength=64}},
     {label="Midfield", slot=5, attributes={speed=72, stamina=71, passing=65, strength=66}},
-    {label="Defense", slot=7, attributes={stickCheck=72, bodyCheck=70, interception=70, strength=73}},
-    {label="Faceoff", slot=4, attributes={faceoff=76, reaction=69, stamina=70, strength=70}},
+    {label="Defense (D-Pole)", slot=7, attributes={stickCheck=72, bodyCheck=70, interception=70, strength=73}},
+    {label="Faceoff Specialist (FOGO)", slot=4, role="FOGO", attributes={faceoff=76, reaction=69, stamina=70, strength=70}},
     {label="Goalie", slot=10, attributes={reflexes=75, handSpeed=74, clearingAccuracy=68, strength=62}},
-    {label="Long-Stick Mid", slot=5, role="LSM"},
+    {label="Long-Stick Middie (LSM)", slot=5, role="LSM"},
     {label="Short-Stick Def Mid", slot=6, role="SSDM"}
 }
 
