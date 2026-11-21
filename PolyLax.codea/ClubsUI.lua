@@ -158,7 +158,7 @@ function screens.SETTINGS(layout, data, options)
         item("CREATOR","Player Creator","Customize the Quick Play athlete"),
         item("EDIT_RELAY","Clubs relay server",field(options,"EDIT_RELAY",relay,"Set the online server address")),
         item("MENU_MUSIC",options.menuMuted and "Menu Music Off" or "Menu Music On",
-            options.hasMenuTheme and "Tap to change" or "Optional PolyLaxTheme asset")
+            options.hasMenuTheme and "Tap to change" or "Main_Menu_Melody unavailable")
     },68)
 end
 

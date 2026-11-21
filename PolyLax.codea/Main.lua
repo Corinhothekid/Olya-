@@ -9,7 +9,7 @@ local function navigate(page)
         P.MenuAssets.leave(state.menuAssets)
     end
     state.page, state.pageAge, state.layout = page, 0, nil
-    if state.menuAssets and page == "FRONT" and previous ~= "FRONT" and state.menuInteracted then
+    if state.menuAssets and page == "FRONT" and previous ~= "FRONT" then
         P.MenuAssets.enter(state.menuAssets)
     end
 end
@@ -811,6 +811,7 @@ local function currentHUDLayout()
 end
 
 function setup()
+    if state and state.menuAssets then P.MenuAssets.leave(state.menuAssets) end
     if supportedOrientations and PORTRAIT then supportedOrientations(PORTRAIT) end
     if viewer then
         viewer.mode = FULLSCREEN
@@ -1254,10 +1255,6 @@ end
 
 function touched(touch)
     if not state then return end
-    if touch.state==BEGAN and not state.menuInteracted then
-        state.menuInteracted=true
-        if state.page=="FRONT" then P.MenuAssets.enter(state.menuAssets) end
-    end
     if isMenu(state.page) then
         menuTouch(touch)
     elseif state.page == "CLUBS" then
@@ -1291,7 +1288,7 @@ function setup()
     startupError = nil
     runChecked("PolyLax could not start", function()
         assert(type(runSetup) == "function" and type(runFrame) == "function",
-            "Install the complete PolyLax 3.2 Main tab.")
+            "Install the complete PolyLax 3.2.1 Main tab.")
         local modules = PolyLax or {}
         local missing = {}
         for _, name in ipairs({

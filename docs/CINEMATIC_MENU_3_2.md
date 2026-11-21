@@ -1,21 +1,18 @@
-# PolyLax 3.2 cinematic menu
+# PolyLax 3.2.1 cinematic menu assets
 
-The home screen runs a dedicated looping Craft scene using the existing field, uniforms, character rigs, and action animations. Its camera moves from a wide field view into a player tracking shot. The sequence plays a dodge, releases a shot into the net, and shows a goal celebration before returning to the wide shot. It creates the field, athletes, camera, and ball once per app session and advances them only on the home screen. No showcase result affects Quick Play, Be a Pro, or Clubs.
+The front menu uses your imported `asset.logo` over the live Craft showcase. It loads the image once and fits it above the menu cards. The existing camera sequence cycles through running, a dodge, a shot, and the goal celebration.
 
-## Update the existing Codea project
+The soundtrack uses `music(asset.Main_Menu_Melody, true, .48)` through the confirmed project key. It starts when the unmuted front menu opens. The loop runs through Codea's music player. On leaving the front menu, PolyLax stops its own track and remembers its playback position for the return. **Settings → Menu Music** keeps its existing saved mute preference. The menu falls back to text and silence if the corresponding media fails to load. [Codea music reference](https://www.codea.io/reference/Sounds.html#music) · [Codea image loading](https://www.codea.io/reference/Storage.html#readImage)
 
-Back up your project, then replace its single Main with the full `PolyLax-3.2-Full-Lua-Code.txt`. Paste through `-- End of PolyLax 3.2`. This keeps your project's imported assets and local saves.
+## Install in your existing Codea project
 
-For a multi-tab 3.1 project, replace `Main`, `Style`, and `ClubsUI`. Add `MenuAssets` and `MenuShowcase`. The tabbed ZIP contains the whole project. Imports and saves belong to your current Codea project, so keep using it to access them.
+- For a single-tab project, back up Main and replace its entire contents with `PolyLax-3.2.1-Full-Lua-Code.txt`. Paste through `-- End of PolyLax 3.2.1`.
+- For an existing multi-tab **3.2 cinematic** project, replace `Main`, `MenuAssets`, `ClubsUI`, and `Style` with the corresponding tabs in the complete 3.2.1 ZIP. If your project predates the cinematic update, use all 39 tabs in the ZIP, including `MenuShowcase`.
 
-## Logo and theme
+Make the update in the same Codea project to keep access to your imported logo, soundtrack, and career saves. The ZIP supplies the Lua project files. Your media already lives on the device.
 
-The asset picker keys are `asset.PolyLaxLogo` and `asset.PolyLaxTheme` for project imports with those names. Files in **Documents** can resolve from `asset.documents.PolyLaxLogo` and `asset.documents.PolyLaxTheme`. The code uses Codea's resolved asset keys, including their actual extensions when lookup is ambiguous. If the logo is unavailable, the home screen displays the PolyLax wordmark in text. The theme is optional and plays after input while the home screen is open. **Settings → Menu Music** controls the saved mute setting. [Codea asset keys](https://www.codea.io/reference/Graphics.html#assetskey) · [Codea music API](https://www.codea.io/reference/Sounds.html#music)
+## Check in Codea
 
-The imported artwork and audio are stored on your device and are absent from the source repository. If you install a fresh project from the ZIP, import the files there through the Codea asset picker.
+Run the existing project with Menu Music on. The soundtrack should start before a tap, and the logo should appear above the menu cards. Watch the showcase repeat, then open Quick Play, Be a Pro, PolyLax Clubs, and Settings. Start Practice, return home, and toggle Menu Music to verify stop, resume, and mute. In a backup project, test playback with the optional files unavailable to confirm the fallback.
 
-## Verify
-
-Let the home screen run through two loops. Confirm the logo and menu cards stay legible, including during the shot and celebration. Open Quick Play, Be a Pro, PolyLax Clubs, and Settings and return from each. Toggle Menu Music, return home, then close and reopen Codea to check the setting. Try without the optional assets to verify the text and silence fallbacks.
-
-Lua 5.4 syntax and mocked Craft tests cover the complete build, the loop, the existing animation releases, menu navigation, optional assets, and unchanged save data. Rendering and the imported files still need a native iPhone check.
+All Lua tabs and the complete Main were syntax-checked with Lua 5.4. The regression uses mocked Craft and Codea media APIs to check the exact keys, menu entry, looping arguments, stop/resume, errors, and existing navigation. The imported files and installed Codea runtime still need a device check.

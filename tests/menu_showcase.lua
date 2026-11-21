@@ -163,8 +163,9 @@ tap(clubLayout.byId.BACK)
 assert(state.page=="FRONT" and newCalls==1 and #menuScene.entities==count)
 assert(mock.store["PolyLax.Career.1"]==oldCareer and mock.store["PolyLax.Clubs.1"]==oldClubs)
 
-local logo, theme = {name="PolyLaxLogo.png",ext="png"}, {name="PolyLaxTheme.m4a",ext="m4a"}
-asset={PolyLaxLogo=logo,PolyLaxTheme=theme}
+-- The confirmed project keys are opaque to the menu loader.
+local logo, theme = {}, {}
+asset={logo=logo,Main_Menu_Melody=theme}
 local imageReads, spriteDraws, starts, stops = 0, 0, 0, 0
 function readImage(key)
     assert(key==logo)
@@ -175,10 +176,11 @@ function sprite(_,x,y,w,h)
     spriteDraws=spriteDraws+1
     assert(x==200 and y==600 and w==200 and h==100,"Logo exceeded its aspect-fit bounds")
 end
-music=setmetatable({}, {__call=function(track,key,looped)
-    assert(key==theme and looped)
+music=setmetatable({duration=92}, {__call=function(track,key,looped,volume)
+    assert(key==theme and looped==true and volume==.48)
     starts=starts+1
-    track.name=key.name
+    track.name="Main Menu Melody.m4a"
+    track.currentTime=0
     track.playing=true
 end})
 function music.stop()
@@ -193,17 +195,28 @@ assert(imageReads==1 and spriteDraws==2,"The logo was reloaded every draw")
 Assets.enter(media)
 Assets.enter(media)
 assert(starts==1,"Entering the menu twice restarted the theme")
+music.currentTime=17.5
 Assets.toggleMute(media)
 assert(stops==1 and media.muted and Assets.load().muted)
 Assets.enter(media)
 assert(starts==1,"Muted theme started")
 Assets.toggleMute(media)
-if starts==1 then Assets.enter(media) end
-assert(starts==2 and not Assets.load().muted)
+Assets.enter(media)
+assert(starts==2 and not Assets.load().muted and music.currentTime==17.5)
 music.name="Another track"
 Assets.leave(media)
 assert(stops==1,"Leaving the menu stopped unrelated music")
 music.name, music.playing = nil, false
+
+local workingRead, workingMusic = readImage, music
+function readImage() error("Image decoder rejected the file") end
+music=setmetatable({}, {__call=function() error("Audio decoder rejected the file") end})
+local corrupt = Assets.load()
+assert(not Assets.drawLogo(corrupt,200,600,220,100),"Image failure skipped text fallback")
+assert(not Assets.enter(corrupt) and not corrupt.hasTheme,"Audio failure crashed or stayed available")
+Assets.leave(corrupt)
+readImage, music = workingRead, workingMusic
+
 function sprite(_,_,_,w,h)
     assert(w>0 and math.abs(w/h-2)<.001,"The front menu distorted the logo")
     spriteDraws=spriteDraws+1
@@ -213,7 +226,17 @@ local priorStarts, priorDraws = starts, spriteDraws
 setup()
 tick()
 local assetState=assert(upvalue(assert(upvalue(draw,"runFrame")),"state"))
-assert(starts==priorStarts and spriteDraws>priorDraws,"Startup did not draw the logo silently")
+assert(starts==priorStarts+1 and spriteDraws>priorDraws,"Startup missed the logo or looping theme")
+for _=1,8 do tick() end
+assert(starts==priorStarts+1,"Drawing frames restarted the theme")
+music.currentTime=24.25
+local beforeLeave = stops
+tap(screenLayout.byId.MODES)
+tap(screenLayout.byId.PRACTICE)
+assert(assetState.page=="PRACTICE" and stops==beforeLeave+1 and not music.name)
+tap(assetState.layout.pause)
+tap(screenLayout.byId.HOME)
+assert(assetState.page=="FRONT" and starts==priorStarts+2 and music.currentTime==24.25)
 tap(screenLayout.byId.SETTINGS)
 tap(clubLayout.byId.MENU_MUSIC)
 assert(assetState.menuAssets.muted and mock.store["PolyLax.MenuMusicMuted.1"]==1)
@@ -226,4 +249,4 @@ assert(not assetState.menuAssets.muted and mock.store["PolyLax.MenuMusicMuted.1"
 tap(clubLayout.byId.BACK)
 assert(starts==mutedStarts+1,"Returning to the front menu did not start the unmuted theme")
 assert(mock.store["PolyLax.Career.1"]==oldCareer and mock.store["PolyLax.Clubs.1"]==oldClubs)
-print("Menu showcase, reused actors, imported media, mute, missing-asset fallback, and four main-menu routes passed.")
+print("Cinematic loops, exact asset keys, startup/resume audio, four menu routes, and media-error fallbacks passed.")
