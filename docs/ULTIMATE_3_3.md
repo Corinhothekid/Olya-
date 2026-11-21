@@ -1,35 +1,35 @@
-# PolyLax Ultimate | Development preview
+# PolyLax Ultimate Team 3.3
 
-Initial foundation for PolyLax Ultimate, with a source-backed 2026 PLL sample, original preview jersey palettes, and collection/squad operations.
+Ultimate Team is available from the cinematic front menu. Its dashboard opens Play Match, My Squad, Player Packs, Gold Wheel, Squad Building Challenges, My Collection, and Jersey Vault.
 
-## Status
-- Implemented: `PolyLax.codea/Ultimate.lua` player records, kit catalog, collection, lineup assignment.
-- Not implemented: main-menu integration, card UI, pack animations, full MLL/NLL historical datasets, automated updates, persistence integration, online Ultimate matches.
-- No official player photographs, likenesses, team marks, official uniform artwork, or league assets are included.
-- Player ratings are deliberately **not** invented. Future ratings must be editorially derived from validated, dated season data, with position-specific models.
-- PLL records: 2026 regular-season source https://stats.premierlacrosseleague.com/player-table (retrieved Nov 2026). The source includes 277 players; this is an 8-player initial sample.
-- NLL source candidate: https://www.nll.com/stats/ . No NLL player statistics have been imported yet.
-- MLL: historical research and season-by-season verification needed before importing.
-- Uniforms are original, inspired by field, throwback, and indoor lacrosse aesthetics, **not** faithful replicas.
+## Install in Codea
 
-## Codea setup
-Add `Ultimate.lua` as a Codea tab to access `PolyLax.Ultimate`. No existing UI navigation or gameplay is changed by this module.
+Keep a backup of your current source. Update the existing project to retain its imported `asset.logo`, `asset.Main_Menu_Melody`, and local saves.
 
-## Release safeguards
-Do not distribute this data module as a publicly marketed official/endorsed PLL, MLL, or NLL product without legal review. Real-world player names and factual statistics are distinct from player likenesses, photos, official logos, team trade dress, jersey artwork, and other protected branding. Secure necessary permissions for commercial uses. No real-money packs are implemented.
+- **Single-tab project** — Replace the entire Main tab with `releases/PolyLax-3.3-Main.lua`. Copy through the last line, `-- End of PolyLax 3.3`.
+- **Multi-tab project** — Use the full `PolyLax.codea/` source from this build. For an incremental update from the previous branch head, replace `Main`, `Style`, `FullMatch`, and `Statistics`. Add or update the seven Ultimate tabs in the order listed in `Info.plist`: `UltimateCatalog`, `Ultimate`, `UltimateEconomy`, `UltimateSBC`, `UltimateSBCUI`, `UltimateUI`, then `UltimateMatch`.
 
-## Next implementation
-1. Codea Ultimate home, card collection, squad builder and kit preview.
-2. Save collection locally; integrate cards with existing Athlete and TeamUniform models.
-3. Validate historical MLL and NLL datasets from primary sources.
-4. Add offline matches and then online friendlies using the Clubs relay.
+Run in Legacy Craft. A missing-tab message names the dependency if the project is incomplete. The complete build archive includes the Lua tabs and Codea project metadata.
 
-## Economy implementation (Nov 2026)
-- `PolyLax.codea/UltimateEconomy.lua` adds five-player starter grants (once per collection), five-player earned packs, 3,500-gold pack purchases, and 1,200-gold single-card wheel spins.
-- Proposed **per-card** rarity weights: elite 90+ 20%, high 85–89 35%, core 75–84 45%. Ratings are deterministic **fictional placeholders** for development and are not verified player ratings. The pool currently contains only eight verified-season PLL entries; MLL and NLL research candidates are excluded.
-- Starter pack fifth slot guarantees 85+; other four slots use the normal odds. Packs and wheel consume only in-game earned gold.
-- Local testing: set `PolyLax.Ultimate.devMode=true` in a development build and call `PolyLax.Ultimate.Economy.grantTestGold(collection)` to grant 1,000,000 gold once per collection. Do not enable this for a production account. No user account has been remotely credited.
-- `Economy.recordMatch(collection,"win"|"draw"|"loss")` supports reward payouts of 450/250/150 gold, but it must be called by a real completed match. It is **not yet connected** to FullMatch or online gameplay.
-- Economy functions are **backend logic only**: no pack-opening screen, animated wheel, live inventory persistence, or Ultimate match entry point has been wired into Main.lua.
-- Use `Ultimate.lua` before `UltimateEconomy.lua` in Codea. For SBC, load `UltimateSBC.lua` before `UltimateSBCUI.lua`.
-- Before public release: independently validate pack probabilities against the final eligible card pool, disclose odds, and review gambling/loot-box laws and platform requirements even if no real-money purchases are offered.
+## Play Ultimate Team
+
+- Open the free starter pack to get five cards. Its first four slots use the standard odds, and the fifth guarantees 85+. In that guaranteed slot the conditional odds are 36.36% Elite and 63.64% High.
+- A standard pack costs 3,500 earned gold and contains five cards. A Gold Wheel spin costs 1,200 gold and awards one card. Standard draws use 20% Elite (90+), 35% High (85–89), and 45% Core (75–84) per card. Gold and cards are saved before the reveal animation so they survive interruptions.
+- Tap slots in My Squad to assign owned players. Put your best faceoff specialist in the FO slot. Temporary reserves fill open slots. The Jersey Vault kit applies to the whole Ultimate squad at kickoff.
+- Play Match runs the existing 20-player simulation against the CPU with four 45-second quarters. Match rewards are 450 gold for a win, 250 for a draw, or 150 for a loss. Results save once at the final whistle and retain the team record and 20 recent results. The existing box score opens after the postgame presentation.
+- An SBC shows its requirements and reward before you confirm the exchange. Submitting removes the exact copies selected, including any equipped copies, and grants the listed gold and unopened packs in the same save. All six challenges are one-time exchanges.
+
+Ultimate Team uses its own local save. Existing Ultimate data migrates on the next successful save. Playable cards are original athletes with development ratings. The editorial catalog separately records sourced PLL, MLL, and NLL players. Six original kit designs ship without official logos, photos, likenesses, or replica jerseys. See [catalog notes and sources](ULTIMATE_CATALOG_3_3.md).
+
+## Private developer build
+
+In a private test copy only, set the source-local `developerBuild` flag in `Ultimate.lua` to `true`, then restart Codea. Open **Ultimate Team → Player Packs → Grant Developer Gold** to grant 1,000,000 once. This private build reads and writes a separate `.Dev` save. The published source defaults to `false`. Its normal build has no grant button and refuses the grant function.
+
+## Test in Codea
+
+1. Open the front menu and verify its logo, music, and Quick Play, Be a Pro, PolyLax Clubs, Settings, and Ultimate Team routes.
+2. Open the starter pack, assign a player, equip a Jersey Vault kit, and restart. Check that the pack cannot be claimed again and all changes are retained.
+3. Verify the pack and wheel prices and animated reveals with a funded private test copy. Review an SBC, cancel once, then submit and verify inventory and the reward.
+4. Start an Ultimate match. Check your owned player, team kit, temporary reserves, faceoff, movement, passing, shooting, pause, and resume. Finish the match and confirm the gold and record update only once.
+
+Automated Lua tests exercise the economy, catalog, SBC confirmation and rollback, touch routes, squad-to-match integration, and rewards. Craft rendering, motion feel, and media playback still require an iPhone check.

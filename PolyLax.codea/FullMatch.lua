@@ -218,6 +218,13 @@ local function resetMatch(match)
 end
 
 local function applyTeamKits(match, homeId, awayId)
+    if match.teamOverride then
+        local teams = match.teamOverride
+        match.homeTeam, match.awayTeam = teams[1], teams[2]
+        match.homeId, match.awayId = teams[1].id, teams[2].id
+        match.kits = {teams[1].kit, teams[2].kit}
+        return
+    end
     local homeKit, awayKit, homeTeam, awayTeam
     if match.venueAway then
         awayKit, homeKit, awayTeam, homeTeam = P.TeamUniform.matchKits(awayId, homeId)
@@ -246,7 +253,7 @@ function Match.new(scene, profile, homeId, awayId, rules)
     rules = rules or {}
     local settings = P.MatchRules.configure(rules)
     local venue = P.TeamUniform.get(rules.fieldTeam or homeId)
-    local field = P.Field.new(scene, venue.field, settings.fieldMetrics)
+    local field = P.Field.new(scene, rules.fieldTheme or venue.field, settings.fieldMetrics)
     local homeGoal = field.goals[1]
     local match = {
         field=field, venueAway=rules.venueAway == true, goalsByTeam=field.goals, goal=vec3(homeGoal.x, homeGoal.top * .5, homeGoal.z),
@@ -254,6 +261,7 @@ function Match.new(scene, profile, homeId, awayId, rules)
     }
     match.humans, match.playerId = rules.humans, rules.playerId
     match.statisticsOptions = rules.statistics
+    match.teamOverride = rules.teams
     match.movementProposals = {}
     local slot = rules and tonumber(rules.careerPlayerSlot)
     if slot then
@@ -268,23 +276,28 @@ function Match.new(scene, profile, homeId, awayId, rules)
     applyTeamKits(match, homeId, awayId)
     for team = 1, 2 do
         local side = directionFor(team)
-        local roster=P.League and P.League.roster(team==1 and match.homeId or match.awayId)
+        local lineup = rules.lineups and rules.lineups[team]
+        local roster = not lineup and P.League and P.League.roster(team==1 and match.homeId or match.awayId)
+        local specialistPole = false
         for slot, spec in ipairs(formation) do
             local index = #match.squad + 1
             local rig = P.Character.new(scene)
             local human = match.humans and match.humans[index]
-            local custom = human or not match.humans and index==(match.careerPlayer or userPlayer)
+            local custom = human or not lineup and not match.humans and index==(match.careerPlayer or userPlayer)
+            local selected = lineup and lineup[slot]
             local appearance = human and human.appearance or custom and profile or playerProfile(team,slot)
-            local member = roster and roster[slot]
+            local member = selected or roster and roster[slot]
             local role = spec[1]
-            local chosenRole = human and human.role or index == match.careerPlayer and rules.careerPlayerRole
+            local chosenRole = human and human.role or selected and selected.role
+                or index == match.careerPlayer and rules.careerPlayerRole
             if role == "M" and (chosenRole == "LSM" or chosenRole == "SSDM") then
                 role = chosenRole
             end
             local long = role == "D" and slot-6 <= settings.maxLongPoles
-                or role == "LSM" and settings.maxLongPoles >= 4
+                or role == "LSM" and settings.maxLongPoles >= 4 and not (lineup and specialistPole)
+            if role == "LSM" and long then specialistPole = true end
             P.Character.setStickType(rig, long and "long" or "short")
-            if member and not custom then appearance.NUMBER=member.number+1 end
+            if member and member.number and not custom then appearance.NUMBER=member.number+1 end
             P.Character.apply(rig, appearance, nil, match.kits[team], false)
             local homeDepth = spec[1] == "G" and -(field.goalZ-1.4) or spec[4]
             local homeX = (slot == 5 and -field.wingX) or (slot == 6 and field.wingX) or spec[3]
@@ -296,6 +309,10 @@ function Match.new(scene, profile, homeId, awayId, rules)
                 attributes=P.Defense.attributes(role)
             }
             if slot == 4 then player.attributes.faceoff = .68 end
+            if selected then
+                player.statId, player.cardUID, player.temporaryAI = selected.statId, selected.cardUID, selected.temporaryAI
+                for key, value in pairs(selected.attributes or {}) do player.attributes[key] = value end
+            end
             if human then
                 player.name = human.name or player.name
                 for key, value in pairs(human.attributes or {}) do
@@ -979,7 +996,8 @@ local function finishPeriod(match)
     match.phaseTime = 0
     if match.period >= match.rules.periods then
         match.phase = "FINAL"
-        P.Statistics.finalize(match,match.humans and {persist=false} or nil)
+        local localBox = match.humans or match.statisticsOptions and match.statisticsOptions.persist == false
+        P.Statistics.finalize(match,localBox and {persist=false} or nil)
         local winner = match.homeScore > match.awayScore and match.homeTeam
             or match.awayScore > match.homeScore and match.awayTeam
         announce(match, winner and winner.name .. " WIN" or "DRAW", 3)

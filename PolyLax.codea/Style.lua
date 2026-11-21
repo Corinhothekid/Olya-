@@ -1,4 +1,4 @@
--- PolyLax 3.2 | Xbox-inspired shared treatments, navigation and pause overlays
+-- PolyLax | Shared menu treatments and pause overlays
 PolyLax = PolyLax or {}
 local Style = {}
 PolyLax.Style = Style
@@ -65,6 +65,7 @@ local choices = {
     FRONT = {
         {id="MODES", title="Quick Play", detail="Practice or play a full match", prominent=true},
         {id="CAREER", title="Be a Pro", detail="Develop your single-player career"},
+        {id="ULTIMATE", title="Ultimate Team", detail="Build a squad and compete", icon="ultimate"},
         {id="CLUBS", title="PolyLax Clubs", detail="Manage your club and athlete", icon="clubs"},
         {id="SETTINGS", title="Settings", detail="Player Creator and online connection"}
     },
@@ -102,8 +103,10 @@ function Style.screenLayout(page, options)
         page=page,x=x,w=w,top=top,bottom=bottom,buttons={},byId={},
         touches={},motion={}
     }
-    local row = pause and math.min(53,room*.115) or math.min(76,room*.142)
-    local gap = pause and 9 or 12
+    local front = page == "FRONT"
+    local row = pause and math.min(53,room*.115) or front and math.min(70,room*.114)
+        or math.min(76,room*.142)
+    local gap = pause and 9 or front and math.min(10,room*.018) or 12
     local stack = #list*row + (#list-1)*gap
     local firstTop
     if pause then
@@ -113,7 +116,8 @@ function Style.screenLayout(page, options)
         firstTop = dashboard.titleY-31
     elseif page == "FRONT" then
         firstTop = bottom+stack+16
-        dashboard.titleY = top-math.min(82,math.max(34,(top-firstTop)*.27))
+        dashboard.titleY = (top+firstTop)*.5
+        dashboard.logoHeight = math.min(120,(top-firstTop)*.84)
     else
         local reserve = math.min(147,room*.30)
         firstTop = math.max(bottom+stack+20,top-reserve)
@@ -121,8 +125,10 @@ function Style.screenLayout(page, options)
     end
     for index, choice in ipairs(list) do
         local enabled = choice.id ~= "STATS" or options and options.statsEnabled == true
+        if choice.id == "RESET" and options and options.resetEnabled == false then enabled=false end
         local y = firstTop-row*.5-(index-1)*(row+gap)
         local item = hitbox(choice.id,x,y,w,row,choice,enabled == true)
+        if choice.id == "HOME" and options and options.ultimatePause then item.label="Ultimate Team" end
         dashboard.buttons[index],dashboard.byId[item.id] = item,item
     end
     return dashboard
@@ -182,7 +188,8 @@ local function drawButton(l, item)
     local motion = l.motion[item]
     local s = 1-.035*(motion and motion.amount or 0)
     local colorTop = item.prominent and blueTop or item.enabled and palette.body or disabledCard
-    local colorRim = item.prominent and palette.glow or item.icon and palette.rim
+    local colorRim = item.prominent and palette.glow or item.icon=="ultimate" and palette.amber
+        or item.icon and palette.rim
         or item.enabled and palette.steel or palette.inset
     local x,y,w,h = item.x,item.y,item.w,item.h
     Style.rounded(x,y-3,w,h,13,cardShadow,s)
@@ -195,13 +202,20 @@ local function drawButton(l, item)
         Style.rounded(left+6,y,37,37,10,palette.inset)
         Style.clubsIcon(left+6,y,36,palette.glow)
         left,maxLabelWidth = left+33,maxLabelWidth-33
+    elseif item.icon == "ultimate" then
+        Style.rounded(left+6,y,37,37,10,palette.inset)
+        Style.rounded(left+6,y-1,17,23,4,palette.amber)
+        Style.rounded(left+6,y+1,13,18,3,palette.inset)
+        Style.rounded(left+6,y+3,8,2,1,palette.amber)
+        Style.rounded(left+6,y-2,6,2,1,palette.amber)
+        left,maxLabelWidth = left+33,maxLabelWidth-33
     end
     local fg = item.enabled and palette.white or disabled
     label(item.label,left,y+(item.detail and 9 or 0),item.prominent and 19 or 16,fg,true,maxLabelWidth)
     if item.detail then label(item.detail,left,y-12,11,item.prominent and palette.white or palette.muted,true,maxLabelWidth) end
     if item.enabled then
         local arrowX = x+w*.5-18
-        stroke(item.prominent and palette.white or palette.glow)
+        stroke(item.prominent and palette.white or item.icon=="ultimate" and palette.amber or palette.glow)
         strokeWidth(2)
         line(arrowX-4,y+4,arrowX,y)
         line(arrowX,y,arrowX-4,y-4)
@@ -238,11 +252,11 @@ function Style.screen(page, l, elapsed, showcase, menuAssets)
         else
             fieldMarks(l)
         end
-        local logoHeight = math.min(115,(l.top-l.titleY)*1.38)
+        local logoHeight = l.logoHeight or math.min(115,(l.top-l.titleY)*1.38)
         local hasLogo = menuAssets and PolyLax.MenuAssets.drawLogo(menuAssets,l.x,l.titleY,l.w*.94,logoHeight)
         local tempo = .5+.5*math.sin((elapsed or 0)*1.6)
         if not hasLogo then
-            local title = page == "FRONT" and "POLYLAX 3.2" or "Play Modes"
+            local title = page == "FRONT" and "POLYLAX 3.3" or "Play Modes"
             local size = page == "FRONT" and math.min(48,l.w*.164) or 30
             font("AvenirNext-HeavyItalic")
             if showcase then label(title,l.x+1,l.titleY+7,size,palette.deep,false,l.w) end

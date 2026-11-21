@@ -108,6 +108,17 @@ local function openMenu(page)
     navigate(page)
 end
 
+local function openUltimate()
+    if not state.ultimate then state.ultimate = P.UltimateUI.new(P.Ultimate.load()) end
+    P.UltimateUI.reset(state.ultimate)
+    local play = state.ultimatePlay
+    if play and play.recorded then state.ultimatePlay = nil end
+    state.ultimate.activeMatch = play ~= nil and play.game.phase ~= "FINAL"
+    state.ultimate.pendingResult = play ~= nil and play.game.phase == "FINAL" and not play.recorded
+    if play and play.rewardMessage then P.UltimateUI.message(state.ultimate,play.rewardMessage) end
+    openMenu("ULTIMATE")
+end
+
 local function openClubs(view)
     state.clubs = state.clubs or P.Clubs.load()
     state.clubView, state.clubPage = view or "CLUBS", 1
@@ -149,6 +160,42 @@ local function beginPresentation(play,kind,options)
     return P.Presentation.start(play,kind,options)
 end
 
+local function settleUltimate(play)
+    if play.recorded or play.game.phase ~= "FINAL" then return end
+    local ok, receipt = P.UltimateMatch.settle(state.ultimate.profile,play.game,play.id)
+    play.recorded, play.rewardAttempted = ok, true
+    if ok then
+        play.rewardMessage = string.format("%s  +%d gold",receipt.result:upper(),receipt.payout)
+    else
+        play.rewardMessage = tostring(receipt or "Could not save the match result")
+    end
+    P.UltimateUI.message(state.ultimate,play.rewardMessage)
+end
+
+local function openUltimateMatch()
+    local play = state.ultimatePlay
+    if play and play.game.phase == "FINAL" then
+        if not play.recorded then settleUltimate(play) end
+        if play.recorded then
+            state.ultimatePlay = nil
+            state.ultimate.pendingResult = false
+        end
+        return
+    end
+    if not play then
+        local scene = configuredScene()
+        local game, id = P.UltimateMatch.new(scene,state.ultimate.profile,state.profile)
+        if not game then
+            P.UltimateUI.message(state.ultimate,tostring(id or "Could not start the match"))
+            return
+        end
+        play = {scene=scene,camera=P.CameraController.new(scene,48),game=game,id=id}
+        state.ultimatePlay = play
+        beginPresentation(play,"pregame")
+    end
+    openMenu("ULTIMATE_MATCH")
+end
+
 local function openPlay(page)
     if page == "PRACTICE" and not state.practice then
         local scene = configuredScene()
@@ -181,7 +228,7 @@ end
 local function statTouch(touch)
     local view=state.statView
     if P.StatsUI.touch(view,P.StatsUI.layout(view),touch)=="close" then
-        navigate(state.statReturn)
+        if state.statReturn == "ULTIMATE" then openUltimate() else navigate(state.statReturn) end
         state.statView,state.statReturn=nil,nil
     end
 end
@@ -465,6 +512,7 @@ local function activePlay(page)
     page = page or state.page
     if page == "TRAINING" then return state.training,P.Gameplay end
     if page == "MATCH" then return state.match, P.FullMatch end
+    if page == "ULTIMATE_MATCH" then return state.ultimatePlay, P.FullMatch end
     if page == "CAREER_GAME" then return state.careerPlay, P.FullMatch end
     if page == "CLUB_MATCH" then return state.clubPlay, state.clubPlay.controller end
     return state.practice, P.Gameplay
@@ -476,8 +524,10 @@ end
 
 local function menuLayout()
     local play = state.resumePage and activePlay(state.resumePage)
-    return P.Style.screenLayout(state.page,{resetEnabled=not (play and play.recorded),
-        statsEnabled=play and play.game.statistics~=nil})
+    local ultimatePause = state.page=="PAUSE" and state.resumePage=="ULTIMATE_MATCH"
+    return P.Style.screenLayout(state.page,{resetEnabled=not (play and
+        (play.recorded or ultimatePause and play.game.phase=="FINAL")),
+        statsEnabled=play and play.game.statistics~=nil,ultimatePause=ultimatePause})
 end
 
 local clubStages = {"highSchool", "college", "professional"}
@@ -638,8 +688,10 @@ local function menuTouch(touch)
             if id=="CREATOR" then openCreator(state.page=="PAUSE" and state.resumePage=="CAREER_GAME" or nil)
             elseif id=="CAREER" then openCareer()
             elseif id=="CLUBS" then openClubs()
+            elseif id=="ULTIMATE" then openUltimate()
             elseif id=="SETTINGS" then openClubs("SETTINGS")
             elseif id=="PRACTICE" or id=="MATCH" then openPlay(id)
+            elseif id=="HOME" and state.page=="PAUSE" and state.resumePage=="ULTIMATE_MATCH" then openUltimate()
             elseif id=="MODES" or id=="HOME" then openMenu(id=="HOME" and "FRONT" or id)
             elseif id=="RESUME" and state.resumePage then navigate(state.resumePage)
             elseif id=="STATS" and state.resumePage then
@@ -826,7 +878,7 @@ end
 
 local function finishPresentation(play,kind)
     if kind=="postgame" or kind=="championship" then
-        openStats(play.game,state.page)
+        openStats(play.game,state.page=="ULTIMATE_MATCH" and "ULTIMATE" or state.page)
         return true
     end
 end
@@ -904,6 +956,11 @@ function draw()
         P.Style.fade(state.pageAge)
         return
     end
+    if state.page=="ULTIMATE" then
+        P.UltimateUI.draw(state.ultimate,dt)
+        P.Style.fade(state.pageAge)
+        return
+    end
     if state.page=="STATS" then
         P.StatsUI.draw(P.StatsUI.layout(state.statView))
         P.Style.fade(state.pageAge)
@@ -956,6 +1013,7 @@ function draw()
         if state.page == "CAREER_GAME" and not play.saveAttempted then
             saveCareerResult(play)
         end
+        if state.page == "ULTIMATE_MATCH" and not play.rewardAttempted then settleUltimate(play) end
         if controller==P.Gameplay then updateTrainingReward(play,state.page) end
         if controller==P.FullMatch or online then
             if not online then
@@ -1186,7 +1244,8 @@ local function playTouch(touch, hud)
             return
         end
         if not online and P.UI.hit(hud.reset, touch.x, touch.y) then
-            if state.page == "CAREER_GAME" and play.recorded then return end
+            if (state.page == "CAREER_GAME" and play.recorded)
+                or (state.page == "ULTIMATE_MATCH" and game.phase == "FINAL") then return end
             P.UI.press(hud, hud.reset, touch.id)
             clearPlayInput()
             resetPlaySession(play,controller,state.page)
@@ -1259,6 +1318,10 @@ function touched(touch)
         menuTouch(touch)
     elseif state.page == "CLUBS" then
         clubsTouch(touch)
+    elseif state.page == "ULTIMATE" then
+        local action = P.UltimateUI.touch(state.ultimate,touch)
+        if action == "HOME" then openMenu("FRONT")
+        elseif action == "PLAY" then openUltimateMatch() end
     elseif state.page == "CREATOR" then
         creatorTouch(touch, currentHUDLayout())
     elseif state.page == "CAREER" then
@@ -1288,20 +1351,22 @@ function setup()
     startupError = nil
     runChecked("PolyLax could not start", function()
         assert(type(runSetup) == "function" and type(runFrame) == "function",
-            "Install the complete PolyLax 3.2.1 Main tab.")
+            "Install the complete PolyLax 3.3 Main tab.")
         local modules = PolyLax or {}
         local missing = {}
         for _, name in ipairs({
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "Midfield", "MatchAI", "FullMatch",
             "Defense", "Faceoff", "MatchRules", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation", "Clubs", "ClubsUI", "ClubsMatch", "ClubsNet", "MenuShowcase", "MenuAssets"
+            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation", "Clubs", "ClubsUI", "ClubsMatch", "ClubsNet", "MenuShowcase", "MenuAssets", "Ultimate", "UltimateUI", "UltimateMatch"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name
             end
         end
         assert(#missing == 0, "Missing Codea tabs: " .. table.concat(missing, ", "))
+        assert(P.Ultimate.Economy and P.Ultimate.SBC and P.Ultimate.SBCUI,
+            "Load UltimateEconomy, UltimateSBC, and UltimateSBCUI after Ultimate.")
         assert(craft and craft.scene, "Open PolyLax in Codea's Legacy Craft runtime.")
         runSetup()
     end)

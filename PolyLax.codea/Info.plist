@@ -43,6 +43,13 @@
 		<string>MenuAssets</string>
 		<string>MenuShowcase</string>
 		<string>CareerSeason</string>
+		<string>UltimateCatalog</string>
+		<string>Ultimate</string>
+		<string>UltimateEconomy</string>
+		<string>UltimateSBC</string>
+		<string>UltimateSBCUI</string>
+		<string>UltimateUI</string>
+		<string>UltimateMatch</string>
 	</array>
 </dict>
 </plist>

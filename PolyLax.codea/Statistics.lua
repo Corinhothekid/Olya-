@@ -114,17 +114,17 @@ function Statistics.new(game, options)
     }
     game.statistics, game.statSummary = statistics, nil
     local rosters
-    if not practice and P.League and P.League.roster then
+    if not options.useMatchRoster and not practice and P.League and P.League.roster then
         rosters = {P.League.roster(homeId),P.League.roster(awayId)}
     end
     for i, player in ipairs(game.squad) do
         local side = statistics.sides[player.team or 1]
-        local id = stablePlayerId(side.id, player.slot or i, practice)
+        local id = player.statId or stablePlayerId(side.id, player.slot or i, practice)
         local rosterPlayer = rosters and rosters[player.team or 1][player.slot or i] or player
         local line = register(statistics,side,id,rosterPlayer)
         line.number = player.number or line.number
         statistics.entries[i] = {actor=line, team=player.team or 1}
-        if i == created then
+        if i == created and not options.useMatchRoster then
             local personal = register(statistics,side,profileId,player,true)
             if not game.careerPlayer then
                 -- Exhibition and practice use the creator for the whole slot.
