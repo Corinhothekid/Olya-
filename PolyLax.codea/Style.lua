@@ -1,4 +1,4 @@
--- PolyLax 2.0 | Shared treatments, navigation and pause overlays
+-- PolyLax 3.2 | Xbox-inspired shared treatments, navigation and pause overlays
 PolyLax = PolyLax or {}
 local Style = {}
 PolyLax.Style = Style
@@ -6,8 +6,8 @@ PolyLax.Style = Style
 local palette = {
     deep=color(9,13,19), graphite=color(21,28,38), body=color(26,34,46),
     inset=color(15,21,29), steel=color(57,73,91), rim=color(80,98,117),
-    muted=color(164,180,197), white=color(245,249,254), blue=color(42,119,239),
-    glow=color(109,188,255), red=color(235,73,93), amber=color(253,206,100)
+    muted=color(164,180,197), white=color(245,249,254), blue=color(38,137,75),
+    glow=color(118,228,153), red=color(235,73,93), amber=color(253,206,100)
 }
 Style.palette = palette
 
@@ -53,7 +53,7 @@ function Style.rounded(x, y, w, h, radius, tint, press)
 end
 
 local panelShadow = color(5,9,14,173)
-local panelActive = color(27,85,172)
+local panelActive = color(21,92,52)
 function Style.panel(x, y, w, h, active, radius)
     radius = radius or 12
     Style.rounded(x,y-2,w,h,radius,panelShadow)
@@ -102,8 +102,8 @@ function Style.screenLayout(page, options)
         page=page,x=x,w=w,top=top,bottom=bottom,buttons={},byId={},
         touches={},motion={}
     }
-    local row = pause and math.min(49,room*.109) or math.min(68,room*.133)
-    local gap = pause and 8 or 11
+    local row = pause and math.min(53,room*.115) or math.min(76,room*.142)
+    local gap = pause and 9 or 12
     local stack = #list*row + (#list-1)*gap
     local firstTop
     if pause then
@@ -145,7 +145,7 @@ local lineInk = color(72,108,143,83)
 local banner = color(22,32,46,239)
 local overlayInk = color(6,10,16,191)
 local cardShadow = color(7,10,15,221)
-local blueTop = color(34,92,182)
+local blueTop = color(24,110,62)
 local disabled = color(122,136,152)
 local disabledCard = color(21,28,38,228)
 
@@ -189,7 +189,7 @@ local function drawButton(l, item)
     Style.rounded(x,y,w,h,13,colorRim,s)
     Style.rounded(x,y,w-2,h-2,12,colorTop,s)
     if item.prominent then Style.rounded(x-w*.5+12,y,3,h*.54,1.5,palette.glow) end
-    local left = x-w*.5+23
+    local left = x-w*.5+27
     local maxLabelWidth = w-75
     if item.icon == "clubs" then
         Style.rounded(left+6,y,37,37,10,palette.inset)
@@ -242,7 +242,7 @@ function Style.screen(page, l, elapsed, showcase, menuAssets)
         local hasLogo = menuAssets and PolyLax.MenuAssets.drawLogo(menuAssets,l.x,l.titleY,l.w*.94,logoHeight)
         local tempo = .5+.5*math.sin((elapsed or 0)*1.6)
         if not hasLogo then
-            local title = page == "FRONT" and "POLYLAX 3.2.1" or "Play Modes"
+            local title = page == "FRONT" and "POLYLAX 3.2" or "Play Modes"
             local size = page == "FRONT" and math.min(48,l.w*.164) or 30
             font("AvenirNext-HeavyItalic")
             if showcase then label(title,l.x+1,l.titleY+7,size,palette.deep,false,l.w) end
