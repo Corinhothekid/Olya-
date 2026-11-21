@@ -6,14 +6,14 @@ P.UltimateMatch = Match
 
 local roles = {"A","A","A","M","M","M","D","D","D","G"}
 local slots = {"A1","A2","A3","FO","M2","M3","D1","D2","D3","G"}
-local specialist = {FO="FO",FACEOFF="FO",LSM="LSM",SSDM="SSDM"}
+local specialist = {FO="FOGO",FOGO="FOGO",FACEOFF="FOGO",LSM="LSM",SSDM="SSDM"}
 local shortNames = {"UT","GLD"}
 
-local function ratings(role, overall)
+local function ratings(role, overall, bonuses)
     local attrs = P.Attributes.forPosition(role)
     local boost = overall - P.Attributes.overall(attrs,role)
     for key, value in pairs(attrs) do
-        attrs[key] = math.max(30,math.min(99,value+boost))
+        attrs[key] = math.max(30,math.min(99,value+boost+(bonuses and bonuses[key] or 0)))
     end
     return attrs
 end
@@ -31,16 +31,16 @@ local function buildLineups(collection)
     for slot, role in ipairs(roles) do
         local uid = collection.squad[slot]
         local card = uid and ultimate.resolveCard(collection,uid)
-        if card and (used[card.id] or ultimate.role(card) ~= role) then card = nil end
-        local fallbackRole = slot==4 and "FO" or role
+        if card and (used[ultimate.identity(card)] or ultimate.role(card) ~= role) then card = nil end
+        local fallbackRole = slot==4 and "FOGO" or role
         local cardRole = card and specialist[tostring(card.position):upper()] or nil
         if card then
-            used[card.id] = true
+            used[ultimate.identity(card)] = true
             own[slot] = {
                 name=ultimate.displayName(card), role=cardRole or fallbackRole,
                 number=nextNumber(numbers,tonumber(card.number) or slot+8),
                 cardUID=uid, statId="ultimate:card:"..tostring(uid),
-                attributes=ratings(cardRole or fallbackRole,ultimate.Economy.rating(card))
+                attributes=ratings(cardRole or fallbackRole,ultimate.Economy.rating(card),card.attributes)
             }
         else
             own[slot] = {
@@ -93,7 +93,9 @@ end
 
 function Match.settle(collection, game, id)
     if game.phase ~= "FINAL" then return false,"Finish the match to earn gold" end
+    local box = P.Statistics.matchSummary(game)
+    if not box or not box.final then return false,"Final match statistics are unavailable" end
     local own, away = game.homeScore,game.awayScore
     local result = own>away and "win" or own<away and "loss" or "draw"
-    return P.Ultimate.Economy.recordMatch(collection,result,id,own,away)
+    return P.Ultimate.Economy.recordMatch(collection,result,id,own,away,box)
 end

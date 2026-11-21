@@ -37,12 +37,12 @@ local function goalHeight(goal)
 end
 
 local function midfielder(player)
-    return player.role == "M" or player.role == "LSM" or player.role == "SSDM"
+    return player.role == "M" or player.role == "FOGO" or player.role == "LSM" or player.role == "SSDM"
 end
 
 local function humanControls(match, id)
     if match.humans then return match.humans[id] ~= nil end
-    return id == match.controlled and not match.careerWaiting
+    return id == match.controlled and not match.careerWaiting and not match.careerOnBench
 end
 
 local function attackingSign(match, team)
@@ -712,7 +712,7 @@ local function requestCrossing(match,ai,team,sign)
             end
         end
     else
-        local human = not match.careerWaiting and match.squad[match.controlled]
+        local human = not (match.careerWaiting or match.careerOnBench) and match.squad[match.controlled]
         local player, heading = humanCrossing(match,human,team,sign,match.moveZ)
         if player then return player,heading end
     end
@@ -941,9 +941,16 @@ function AI.sweepKeeper(match, keeperID, from, to, velocity)
         local head = keeper.rig.pocket.worldPosition
         local gap = memory.style and .26 or .18
         local maxCatchSpeed = 14.5 + hands*10 + rate*3
-        consider(head, gap + hands*.09, velocity:len() <= maxCatchSpeed)
+        local catchable = velocity:len() <= maxCatchSpeed
+        consider(head, gap + hands*.09, catchable)
         local stick = keeper.rig.stickRoot
         if stick then
+            if keeper.stickType=="goalie" then
+                for _, side in ipairs({-1,1}) do
+                    consider(stick:transformPoint(vec3(side*.218,.88,-.10)),.16+hands*.035,catchable)
+                end
+                consider(stick:transformPoint(vec3(0,1.11,-.134)),.14,catchable)
+            end
             consider(stick:transformPoint(vec3(0,.35,0)), .08, false)
             consider(stick:transformPoint(vec3(0,.01,0)), .08, false)
         end

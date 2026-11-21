@@ -24,12 +24,12 @@ local tierColors = {
     elite=color(239,193,101), high=color(131,193,170), core=color(170,179,165)
 }
 
--- The smallest exchanges use an attacking pattern. Six cards make a 2-3-1.
+-- Advance up the field from goalie and defense through midfield to attack.
 local formations = {
     [2]={{.30,.60},{.70,.60}},
-    [3]={{.25,.56},{.50,.76},{.75,.56}},
-    [4]={{.50,.81},{.24,.56},{.76,.56},{.50,.29}},
-    [6]={{.33,.79},{.67,.79},{.21,.53},{.50,.53},{.79,.53},{.50,.26}}
+    [3]={{.50,.77},{.27,.52},{.50,.25}},
+    [4]={{.50,.80},{.27,.58},{.72,.50},{.50,.23}},
+    [6]={{.33,.78},{.67,.78},{.23,.52},{.50,.52},{.77,.48},{.50,.22}}
 }
 
 local function box(x, y, w, h)
@@ -88,7 +88,7 @@ local function refreshChoices(state)
     end
     local list, ch = {}, challenge(state)
     for _, owned in ipairs(U.ownedCards(state.collection)) do
-        if not used[owned.uid] and SBC.allows(ch,owned.player) then
+        if not used[owned.uid] and SBC.allows(ch,owned.player,state.selected) then
             list[#list+1] = owned
         end
     end
@@ -109,19 +109,33 @@ local function changeChallenge(state, direction)
     state.selected, state.message = 1, nil
 end
 
+local function fieldSlots(count)
+    if formations[count] then return formations[count] end
+    local points = {}
+    local columns = math.min(count,3)
+    local rows = math.ceil(count/columns)
+    for index=1,count do
+        local row = math.floor((index-1)/columns)
+        local inRow = math.min(columns,count-row*columns)
+        points[index] = {((index-1)%columns+1)/(inRow+1),1-(row+.5)/rows}
+    end
+    return points
+end
+
 function UI.layout(state)
     local safe = P.UI.safeArea()
     local width = math.min(460,WIDTH-safe.left-safe.right-26)
     local cx = (WIDTH+safe.left-safe.right)*.5
     local top, bottom = HEIGHT-safe.top-9, safe.bottom+11
     local left, right = cx-width*.5,cx+width*.5
-    local fieldTop, fieldBottom = top-126,bottom+98
+    local fieldTop, fieldBottom = top-154,bottom+98
     local fieldHeight = fieldTop-fieldBottom
     local f = box(cx,fieldBottom+fieldHeight*.5,width,fieldHeight)
     local slots, ch = {},challenge(state)
-    for i, point in ipairs(formations[ch.slots]) do
+    local slotHeight = math.min(83,fieldHeight*math.min(.235,.85/math.ceil(ch.slots/3)))
+    for i, point in ipairs(ch.formation or fieldSlots(ch.slots)) do
         slots[i] = box(left+point[1]*width,fieldBottom+point[2]*fieldHeight,
-            math.min(77,width*.216),math.min(83,fieldHeight*.235))
+            math.min(77,width*.216),slotHeight)
     end
 
     local rowH = math.min(53,math.max(35,(top-bottom-168)/6))
@@ -177,12 +191,12 @@ local function pitch(l)
     noStroke()
 end
 
-local function drawCard(b, player, current)
+local function drawCard(b, player, current, position)
     surface(box(b.x,b.y-2,b.w,b.h),shadow,8)
     if not player then
         outlined(b,cardInk,current and gold or panelBorder,8)
         label("+",b.x,b.y+2,23,current and gold or green)
-        label("ADD",b.x,b.y-b.h*.3,9,muted)
+        label(SBC.positionLabel(position),b.x,b.y-b.h*.3,9,muted)
         return
     end
     local rating, tier = tierOf(player)
@@ -190,7 +204,7 @@ local function drawCard(b, player, current)
     local name = U.displayName(player)
     label(tostring(rating),b.x,b.y+b.h*.26,17,cardInk)
     label(name:match("([^ ]+)$") or name,b.x,b.y-1,11,cardInk,b.w-5)
-    label(player.league.." · "..U.role(player),b.x,b.y-b.h*.31,9,cardInk,b.w-5)
+    label(player.league.." · "..SBC.positionLabel(player.position or U.role(player)),b.x,b.y-b.h*.31,9,cardInk,b.w-5)
 end
 
 local function drawField(state, l, ch)
@@ -199,15 +213,30 @@ local function drawField(state, l, ch)
     label(state.challenge.." / "..#SBC.challenges,l.x,l.top-83,10,muted)
     button(l.previous,"‹")
     button(l.next,"›")
-    label(SBC.requirements(ch),l.x,l.top-109,13,ink,l.width-10)
+    local complete = SBC.isComplete(state.collection,ch)
+    local valid, detail, metrics = SBC.validate(state.collection,ch.id,state.entries)
+    label(SBC.requirements(ch),l.x,l.top-104,12,ink,l.width-10)
+    if complete then
+        label("Exchange completed",l.x,l.top-123,11,green,l.width-10)
+    elseif metrics and (ch.rules.minOverall or ch.rules.minChemistry) then
+        local progress = {}
+        if ch.rules.minOverall then
+            local overall = metrics.cards>0 and ("%.1f"):format(metrics.overall) or "—"
+            progress[1] = "Avg OVR "..overall.."/"..ch.rules.minOverall
+        end
+        if ch.rules.minChemistry then
+            progress[#progress+1] = ("Chemistry %d/%d"):format(metrics.chemistry,ch.rules.minChemistry)
+            label("+1 chemistry per same-league pair",l.x,l.top-138,10,muted,l.width-10)
+        end
+        label(table.concat(progress," · "),l.x,l.top-122,11,valid and green or muted,l.width-10)
+    end
     pitch(l)
     for index, slot in ipairs(l.slots) do
-        drawCard(slot,U.resolveCard(state.collection,state.entries[index]),index==state.selected)
+        drawCard(slot,U.resolveCard(state.collection,state.entries[index]),index==state.selected,
+            SBC.positionForSlot(ch,index))
     end
     label("REWARD   "..ch.reward.coins.." GOLD   +   "..ch.reward.pack..
         (ch.reward.pack==1 and " PACK" or " PACKS"),l.x,l.bottom+82,11,gold,l.width)
-    local complete = SBC.isComplete(state.collection,ch)
-    local valid, detail = SBC.validate(state.collection,ch.id,state.entries)
     label(state.message or (valid and "Squad ready" or detail),l.x,l.bottom+61,11,
         state.message and (complete and green or red) or muted,l.width)
     if valid then
@@ -225,12 +254,16 @@ local function cardRow(item, player, equipped, selected)
     surface(box(cx,item.y,31,30),tier,7)
     label(tostring(rating),cx,item.y,12,cardInk)
     leftLabel(U.displayName(player),cx+24,item.y+7,13,ink,item.w-67)
-    local info = player.league.." · "..U.role(player)..(equipped and " · In squad" or "")
+    local info = player.league.." · "..SBC.positionLabel(player.position or U.role(player))
+        ..(equipped and " · In squad" or "")
     leftLabel(info,cx+24,item.y-10,10,equipped and gold or muted,item.w-67)
 end
 
 local function drawPicker(state, l)
-    label("Slot "..state.selected.." · "..SBC.requirements(challenge(state)),
+    local ch = challenge(state)
+    local position = SBC.positionLabel(SBC.positionForSlot(ch,state.selected))
+    local league = ch.rules.league
+    label("Slot "..state.selected.." · "..position..(league and (" · "..league) or ""),
         l.x,l.top-57,13,muted,l.width)
     if #state.options == 0 then
         label("No eligible cards are available.",l.x,l.field.y,15,muted,l.width)

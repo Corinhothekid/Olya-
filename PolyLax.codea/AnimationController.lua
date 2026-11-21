@@ -362,6 +362,11 @@ function Animation.update(controller, dt, input)
         base.shaft = vec3(.52 + cradle * .09, .85 - cradle * .06,
             .11 + swing * .067 + cradle * .036)
         base.roll = cradle * 15 + swing * 6
+    elseif rig.stickType == "goalie" then
+        base.grip = vec3(.24 + cradle*.019,.62 + breath*.01 + swing*.026,-.40 + swing*.040)
+        base.shaft = vec3(.23 + cradle*.067,.96,.17 + swing*.045)
+        base.crouch = .10*(1-run)*(.95-controller.carry*.55)
+        base.roll = 8 + cradle*12 + swing*5
     end
     local pose, event = base, nil
     local pocketTarget, pocketWeight

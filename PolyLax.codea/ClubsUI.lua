@@ -109,7 +109,8 @@ end
 local screens = {}
 
 function screens.CLUBS(layout, data, options)
-    local club, player = options.lobby or data.club, data.player or {}
+    local club = options.lobby or options.savedRoom and options.savedRoom.club or data.club
+    local player = data.player or {}
     local title = club and club.name or "Your club"
     local identity = P.Athlete.name(player)
     local description = club and (teamName(club.team) or "Local club").."  ·  "..identity
@@ -163,6 +164,10 @@ function screens.SETTINGS(layout, data, options)
 end
 
 function screens.ROSTER(layout, data, options)
+    if options.savedRoom and not options.lobby then
+        pageList(layout,{},rosterRow,"Reconnect to view the current room roster.",options)
+        return
+    end
     local roster=options.roster or P.Clubs.roster(data) or {}
     pageList(layout,roster,rosterRow,"Create or join a club to view its roster.",options)
 end
@@ -175,31 +180,53 @@ end
 function screens.LOBBY(layout, data, options)
     local lobby=options.lobby
     if not lobby then
-        clubStamp(layout,data.club and data.club.name or "Club Lobby","This club is saved on this device")
-        stack(layout,{item("HOST_ONLINE","Host Online","Open an invitation room on the relay",
-            options.hostEnabled==true,true)},62)
+        local saved, hosted = options.savedRoom, options.hostedRoom
+        local club = saved and saved.club or data.club
+        local description = saved and ("Permanent room code   "..saved.club.code) or "Set up your online club"
+        clubStamp(layout,club and club.name or "Club Lobby",description)
+        local rows = {}
+        if saved then
+            rows[#rows+1] = item("RESUME_ROOM","Reconnect to Room",nil,options.canReconnect==true,true)
+        end
+        if not saved or data.club and hosted ~= saved then
+            rows[#rows+1] = item("HOST_ONLINE",hosted and "Open My Club" or "Host Online",
+                hosted and ("Permanent room code   "..hosted.club.code) or "Get a permanent invitation code",
+                options.hostEnabled==true,not saved)
+        end
+        stack(layout,rows,62)
         if not options.message and not relayURL(data,options) then
             layout.message="Set a relay server address in Settings to host online."
         end
         return
     end
     local code = lobby.code
-    local description = code and code~="" and ("Invitation code   "..code) or "Connecting to the relay"
+    local description = code and code~="" and ("Room code   "..code) or "Connecting to the relay"
+    local status
     if lobby.phase=="final" and lobby.result then
-        description=string.format("Final score   %d–%d",lobby.result.homeScore,lobby.result.awayScore)
+        status=string.format("Final score   %d–%d",lobby.result.homeScore,lobby.result.awayScore)
     end
-    clubStamp(layout,lobby.name or data.club and data.club.name or "Club Lobby",description)
+    clubStamp(layout,lobby.name or data.club and data.club.name or "Club Lobby",description,status)
     local y = layout.floor+19
-    if lobby.phase=="match" then
+    if lobby.phase=="match" and options.interrupted then
+        local label=options.confirmRecovery and "Confirm Match Reset" or "Recover Interrupted Lobby"
+        place(layout,item("RECOVER_ROOM",label,nil,options.canRecover==true,true),layout.x,y,layout.w,38)
+    elseif lobby.phase=="match" then
         place(layout,item("RESUME_MATCH","Return to Match",nil,options.canResume==true,true),layout.x,y,layout.w,38)
     elseif lobby.phase=="final" then
-        place(layout,item("LEAVE","Leave Room"),layout.x,y,layout.w,38)
+        if options.host then
+            local width=(layout.w-8)*.5
+            place(layout,item("REOPEN_ROOM","Reopen Lobby",nil,options.canReopen==true,true),
+                layout.x-width*.5-4,y,width,38)
+            place(layout,item("LEAVE","Disconnect"),layout.x+width*.5+4,y,width,38)
+        else
+            place(layout,item("LEAVE","Disconnect"),layout.x,y,layout.w,38)
+        end
     else
         local width = (layout.w-12)/3
         place(layout,item("READY",options.ready and "Unready" or "Ready",nil,options.canReady==true),
             layout.x-width-6,y,width,38)
         place(layout,item("START","Start Game",nil,options.canStart==true,true),layout.x,y,width,38)
-        place(layout,item("LEAVE","Leave"),layout.x+width+6,y,width,38)
+        place(layout,item("LEAVE","Disconnect"),layout.x+width+6,y,width,38)
     end
     layout.floor=layout.floor+45
     pageList(layout,options.roster or lobby.members or {},rosterRow,"Waiting for players",options)

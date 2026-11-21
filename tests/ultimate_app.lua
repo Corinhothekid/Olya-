@@ -30,11 +30,20 @@ json = {
 }
 
 local combined = os.getenv("POLYLAX_TEST_DELIVERABLE")
+local privateBuild = os.getenv("POLYLAX_TEST_PRIVATE") == "1"
 if combined then dofile(combined)
 else
     local info = assert(io.open(project.."/Info.plist"))
     for tab in info:read("*a"):gmatch("<string>([%w_]+)</string>") do
-        dofile(project.."/"..tab..".lua")
+        if privateBuild and tab=="Ultimate" then
+            local file=assert(io.open(project.."/Ultimate.lua"))
+            local source,count=file:read("*a"):gsub("local developerBuild = false","local developerBuild = true",1)
+            file:close()
+            assert(count==1)
+            assert(load(source))()
+        else
+            dofile(project.."/"..tab..".lua")
+        end
     end
     info:close()
 end
@@ -83,6 +92,20 @@ local function ultimateButton(id)
     return assert(P.UltimateUI.layout(ui).byId[id],"Missing Ultimate Team button "..id)
 end
 
+if privateBuild then
+    tap(ultimateButton("DEV")); draw()
+    tap(ultimateButton("TEST_GOLD")); draw()
+    assert(profile.coins==1000000 and not ultimateButton("TEST_GOLD").enabled)
+    tap(ultimateButton("DEV_RESET")); draw()
+    assert(ui.page=="DEV_CONFIRM" and profile.coins==1000000)
+    tap(ultimateButton("BACK"))
+    tap(ultimateButton("DEV_RESET")); tap(ultimateButton("DEV_CONFIRM")); draw()
+    assert(ui.page=="DEV" and profile.coins==0 and profile.testGoldGranted)
+    tap(ultimateButton("BACK"))
+else
+    assert(not P.UltimateUI.layout(ui).byId.DEV)
+end
+
 local function verifyMatch(play)
     local game = play.game
     assert(#game.squad==20 and #game.teams[1]==10 and #game.teams[2]==10)
@@ -103,7 +126,7 @@ local function verifyMatch(play)
 end
 
 local function finishMatch(play, own, opponent)
-    -- Let the actual faceoff enter LIVE, then advance the regulation clock to its final whistle.
+    -- Let the faceoff enter LIVE and exercise goal-plane detection before the final whistle.
     if play.presentation then P.Presentation.skip(play) end
     for _=1,220 do
         if play.game.phase=="LIVE" then break end
@@ -111,9 +134,30 @@ local function finishMatch(play, own, opponent)
     end
     local game = play.game
     assert(game.phase=="LIVE","The full-match faceoff did not start live play")
-    game.homeScore,game.awayScore = own,opponent
-    game.period,game.clock = game.rules.periods,.001
-    draw()
+    game.period=game.rules.periods
+    if own~=opponent then
+        local team=own>opponent and 1 or 2
+        local goal=game.goalsByTeam[team]
+        local keeper=game.squad[game.keepers[3-team]]
+        keeper.x=goal.x+8
+        keeper.rig.root.position=vec3(keeper.x,0,keeper.z)
+        local origin=vec3(goal.x+goal.halfWidth*.35,goal.top*.45,goal.z-goal.attackSign*.25)
+        game.carrier,game.pending,game.loose=nil,nil,nil
+        game.ball.position=origin
+        game.ballVelocity=vec3(0,0,goal.attackSign*26)
+        game.flight={from=game.teams[team][1],kind="shot",team=team,goal=goal,
+            origin=origin,velocity=game.ballVelocity,time=0,duration=.5,onTarget=true}
+        draw()
+        assert(game.phase=="GOAL" and game.homeScore==own and game.awayScore==opponent)
+        game.clock=0
+        if play.presentation then P.Presentation.skip(play) end
+    else
+        game.clock=.001
+    end
+    for _=1,80 do
+        if game.phase=="FINAL" then break end
+        draw()
+    end
     assert(game.phase=="FINAL" and play.recorded and play.presentation)
     local delta = profile.coins
     for _=1,160 do
@@ -144,7 +188,11 @@ tap(ultimateButton("OPEN_PACK")); draw()
 assert(profile.unopenedPacks==0 and #ui.reveal.cards==5 and #U.ownedCards(profile)==10)
 tap(ultimateButton("DONE")); tap(ultimateButton("DONE"))
 tap(ultimateButton("BACK")); tap(ultimateButton("WHEEL")); draw()
-tap(ultimateButton("SPIN")); draw()
+local wheel=ultimateButton("SPIN")
+tap(wheel)
+touched({state=ENDED,id=serial,x=wheel.x,y=wheel.y})
+tap(wheel)
+draw()
 assert(profile.coins==300 and #ui.reveal.cards==1 and #U.ownedCards(profile)==11)
 for _=1,70 do draw() end
 tap(ultimateButton("WHEEL_DONE"))
@@ -178,7 +226,7 @@ tap(ultimateButton("KIT:heritage_crimson")); draw()
 assert(U.load().equippedKit=="heritage_crimson")
 tap(ultimateButton("BACK"))
 
-local records = {{3,1,450,"win"},{0,0,250,"draw"},{0,2,150,"loss"}}
+local records = {{1,0,450,"win"},{0,0,250,"draw"},{0,1,150,"loss"}}
 for i, record in ipairs(records) do
     local before = profile.coins
     tap(ultimateButton("PLAY")); draw()
@@ -203,11 +251,21 @@ for i, record in ipairs(records) do
     local loaded = U.load()
     assert(loaded.matches==i and loaded.coins==before+record[3] and #U.ownedCards(loaded)==11)
     assert(loaded.matchHistory[i].result==record[4])
+    local box=assert(loaded.matchHistory[i].box)
+    assert(box.homeScore==record[1] and box.awayScore==record[2])
+    assert((box.sides[1].stats.goals or 0)==record[1] and (box.sides[2].stats.goals or 0)==record[2])
     assert(not E.recordMatch(profile,record[4],play.id,record[1],record[2]))
 end
 assert(profile.wins==1 and profile.draws==1 and profile.losses==1)
 assert(mock.store["PolyLax.Career.1"]==careerSave and mock.store["PolyLax.Clubs.1"]==clubsSave)
 assert(mock.store["PolyLax.Statistics.2.career-player"]==nil)
+tap(ultimateButton("RECORD")); draw()
+assert(ui.page=="RECORD")
+tap(ultimateButton("RESULT:1")); draw()
+assert(app.page=="STATS" and app.statView.summary.homeScore==1)
+tap(P.StatsUI.layout(app.statView).close); draw()
+assert(app.page=="ULTIMATE" and ui.page=="RECORD")
+tap(ultimateButton("BACK"))
 tap(ultimateButton("BACK")); draw()
 assert(app.page=="FRONT")
 print("Ultimate dashboard, packs, wheel, squad, SBC, jerseys, 20-player matches and single-settlement payouts passed.")

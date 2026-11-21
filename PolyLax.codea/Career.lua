@@ -13,13 +13,13 @@ local statKeys = {"goals","assists","points","saves","goalsAllowed","shotsFaced"
 Career.statKeys = statKeys
 
 Career.positions = {
-    {label="Attack (ATT)", slot=1, attributes={shooting=68, ballSecurity=67, speed=69, strength=64}},
-    {label="Midfield", slot=5, attributes={speed=72, stamina=71, passing=65, strength=66}},
-    {label="Defense (D-Pole)", slot=7, attributes={stickCheck=72, bodyCheck=70, interception=70, strength=73}},
-    {label="Faceoff Specialist (FOGO)", slot=4, role="FOGO", attributes={faceoff=76, reaction=69, stamina=70, strength=70}},
-    {label="Goalie", slot=10, attributes={reflexes=75, handSpeed=74, clearingAccuracy=68, strength=62}},
-    {label="Long-Stick Middie (LSM)", slot=5, role="LSM"},
-    {label="Short-Stick Def Mid", slot=6, role="SSDM"}
+    {label="Attack (ATT)", slot=1, role="A", stick="short"},
+    {label="Midfielder (MID)", slot=5, role="M", stick="short"},
+    {label="Defense (D-Pole)", slot=7, role="D", stick="long"},
+    {label="Faceoff Specialist (FOGO)", slot=4, role="FOGO", stick="short", shift="faceoff"},
+    {label="Goalie (G)", slot=10, role="G", stick="goalie"},
+    {label="Long-Stick Midfielder (LSM)", slot=5, role="LSM", stick="long", shift="defense"},
+    {label="Short-Stick Defensive Midfielder (SSDM)", slot=6, role="SSDM", stick="short"}
 }
 
 Career.stages = {highSchool="HIGH SCHOOL", college="COLLEGE", professional="PROFESSIONAL"}
@@ -153,14 +153,15 @@ end
 function Career.matchOptions(career, fixture)
     local home = P.TeamUniform.get(career.team)
     local age = home.ruleset
+    local assignment = position(career.position)
     local ruleset = ({highSchool="highSchool",ncaa="ncaa",club="collegeClub",
         professional="professional"})[home.fieldType] or "arcade"
     return {name="Career short game", profile=ruleset, periods=2, periodLength=60, intermissionTime=2,
         ageGroup=age, bodyContact=age == "highSchool" or age == "adult",
         faceoffDifficulty=career.stage == "professional" and "HARD" or "NORMAL",
-        careerEntryDelay=P.CareerSeason.status(career).starter and 0 or 4,
+        careerEntryDelay=(assignment.role=="FOGO" or P.CareerSeason.status(career).starter) and 0 or 4,
         fieldTeam=fixture.home and career.team or fixture.opponent, venueAway=not fixture.home,
-        careerPlayerSlot=position(career.position).slot, careerPlayerRole=position(career.position).role,
+        careerPlayerSlot=assignment.slot, careerPlayerRole=assignment.role, careerShift=assignment.shift,
         playerName=career.name,
         playerAttributes=copy(career.attributes)}
 end

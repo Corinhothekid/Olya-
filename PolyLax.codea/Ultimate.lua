@@ -49,10 +49,19 @@ function Ultimate.role(player)
     if not player then return nil end
     local position = player.position or player.role
     if position == "F" then return "A" end
-    if position == "T" or position == "FO" or position == "FACEOFF" or position == "LSM" or position == "SSDM" then
+    if position == "T" or position == "FO" or position == "FOGO" or position == "FACEOFF"
+        or position == "LSM" or position == "SSDM" then
         return "M"
     end
     return position
+end
+
+function Ultimate.identity(player)
+    return player and (player.identity or player.id)
+end
+
+function Ultimate.isCollectible(player)
+    return player and player.playable == true and (player.fictional == true or player.verification == "verified")
 end
 
 function Ultimate.defaultCollection()
@@ -78,6 +87,49 @@ local function copy(value)
     return out
 end
 
+local function statValues(raw)
+    local values = {}
+    if type(raw) == "table" then
+        for key, value in pairs(raw) do
+            if type(key) == "string" and #key <= 32 and type(value) == "number"
+                and math.abs(value) < math.huge then values[key] = value end
+        end
+    end
+    return values
+end
+
+-- Keep the box score required by StatsUI, without the per-frame match event log.
+function Ultimate.resultBox(raw, matchId, ownScore, opponentScore)
+    if type(raw) ~= "table" or raw.final ~= true or raw.id ~= "ultimate:match:"..matchId
+        or raw.homeScore ~= ownScore or raw.awayScore ~= opponentScore
+        or type(raw.sides) ~= "table" or type(raw.players) ~= "table" then return end
+    local box = {id=raw.id,source="played",mode="ULTIMATE TEAM",final=true,
+        homeScore=ownScore,awayScore=opponentScore,sides={},players={}}
+    for index=1,2 do
+        local side = raw.sides[index]
+        if type(side) ~= "table" or type(side.name) ~= "string" or type(side.roster) ~= "table"
+            or #side.roster ~= 10 then return end
+        local line = {name=side.name:sub(1,60),id=side.id,roster={},
+            stats=statValues(side.stats),rates=statValues(side.rates)}
+        box.sides[index] = line
+        for slot=1,10 do
+            local id = side.roster[slot]
+            if type(id) ~= "string" or #id > 80 or box.players[id] then return end
+            local player = raw.players[id]
+            if type(player) ~= "table" or type(player.name) ~= "string" then return end
+            box.players[id] = {playerId=id,teamId=line.id,slot=slot,name=player.name:sub(1,100),
+                number=nonnegativeInt(player.number),role=type(player.role)=="string" and player.role:sub(1,12),
+                stats=statValues(player.stats),rates=statValues(player.rates)}
+            line.roster[slot] = id
+        end
+    end
+    box.homeId,box.awayId = box.sides[1].id,box.sides[2].id
+    if type(raw.playerOfGame)=="string" and box.players[raw.playerOfGame] then
+        box.playerOfGame=raw.playerOfGame
+    end
+    return box
+end
+
 local function addInstance(collection, id)
     local uid = "card-" .. tostring(collection.nextCardId)
     collection.cards[uid] = id
@@ -87,7 +139,7 @@ end
 
 -- Raw inventory operations are used inside Ultimate.transact.
 function Ultimate.addCard(collection, id)
-    if not Ultimate.find(id) then return false, "Unknown player" end
+    if not Ultimate.isCollectible(Ultimate.find(id)) then return false, "Unknown player" end
     return true, addInstance(collection, id)
 end
 
@@ -150,9 +202,10 @@ local function restoreCards(collection, raw)
         local saved = raw.squad[tostring(slot)] or raw.squad[slot]
         local uid = firstCopy[saved] or saved
         local player = Ultimate.resolveCard(collection, uid)
-        if player and Ultimate.role(player) == role and not seen[player.id] then
+        local identity = Ultimate.identity(player)
+        if player and Ultimate.role(player) == role and not seen[identity] then
             collection.squad[slot] = uid
-            seen[player.id] = true
+            seen[identity] = true
         end
     end
 end
@@ -169,11 +222,13 @@ local function restoreMatches(collection, raw)
                 local id = nonnegativeInt(entry.id)
                 local result = entry.result
                 if id > 0 and not seen[id] and (result == "win" or result == "draw" or result == "loss") then
-                    collection.matchHistory[#collection.matchHistory+1] = {
+                    local record = {
                         id=id, result=result, payout=nonnegativeInt(entry.payout),
                         ownScore=entry.ownScore and nonnegativeInt(entry.ownScore),
                         opponentScore=entry.opponentScore and nonnegativeInt(entry.opponentScore)
                     }
+                    record.box = Ultimate.resultBox(entry.box,id,record.ownScore,record.opponentScore)
+                    collection.matchHistory[#collection.matchHistory+1] = record
                     nextMatchId = math.max(nextMatchId, id+1)
                     seen[id] = true
                 end
@@ -267,7 +322,9 @@ function Ultimate.equip(collection, slot, uid)
     if Ultimate.role(player) ~= Ultimate.slotRoles[slot] then return false, "Wrong position" end
     for otherSlot, otherUid in pairs(collection.squad) do
         local other = Ultimate.resolveCard(collection, otherUid)
-        if otherSlot ~= slot and other and player.id == other.id then return false, "Already in squad" end
+        if otherSlot ~= slot and other and Ultimate.identity(player) == Ultimate.identity(other) then
+            return false, "This athlete already starts in another slot"
+        end
     end
     return Ultimate.transact(collection, function(draft)
         draft.squad[slot] = uid

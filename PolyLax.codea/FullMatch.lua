@@ -45,12 +45,16 @@ local function newStats()
         faceoffAttempts=0, faceoffViolations=0, faceoffScrambles=0}
 end
 
+local function careerOffField(match, index)
+    return index == match.careerPlayer and (match.careerWaiting or match.careerOnBench)
+end
+
 function Match.recordStat(match, index, key, amount, detail)
     local player = match.squad[index]
     if not player then return end
     local team = match.stats[player.team]
     local increment = amount or 1
-    if not (match.careerWaiting and index == match.careerPlayer) then
+    if not careerOffField(match,index) then
         player.stats[key] = (player.stats[key] or 0) + increment
     end
     team[key] = (team[key] or 0) + increment
@@ -67,7 +71,7 @@ local function screenStat(match, index, key, detail)
     local points = screenEvaluation[key]
     if not points then return end
     Match.recordStat(match,index,"screenCoachPoints",points)
-    if match.careerWaiting and index==match.careerPlayer then return end
+    if careerOffField(match,index) then return end
     local events = match.squad[index].screenCoachEvents
     events[#events+1] = {kind=key,points=points,time=match.elapsed,
         user=detail and detail.user,defender=detail and detail.defender}
@@ -123,7 +127,7 @@ end
 
 local function humanControls(match, index)
     if match.humans then return match.humans[index] ~= nil end
-    return index == match.controlled and not match.careerWaiting
+    return index == match.controlled and not careerOffField(match,index)
 end
 
 local function attach(match, index, select, source)
@@ -155,6 +159,7 @@ local function freeBall(match, position, velocity, lastTouch, fromShot)
 end
 
 local function startFaceoff(match)
+    if match.specialistShift then P.SpecialistShift.faceoff(match) end
     P.Statistics.resetPossession(match)
     P.MatchRules.stop(match)
     local afterPeriod = match.phase == "INTERMISSION"
@@ -206,6 +211,7 @@ local function resetMatch(match)
     match.stats = {newStats(), newStats()}
     match.faceoffSerial = 0
     match.careerWaiting = match.careerEntryDelay and match.careerEntryDelay > 0
+    if match.specialistShift then P.SpecialistShift.faceoff(match) end
     for _, player in ipairs(match.squad) do
         player.stats, player.screenCoachEvents = newStats(), {}
         player.runningFatigue = 0
@@ -241,13 +247,25 @@ function Match.applyProfile(match, profile, homeId, awayId)
     for index, player in ipairs(match.squad) do
         local kit = match.kits[player.team]
         if index == (match.careerPlayer or userPlayer) then
-            P.Character.apply(player.rig, profile, nil, kit, false)
-            player.number = player.rig.numberValue
+            local personal = Match.careerAthlete(match) or player
+            P.Character.apply(personal.rig, profile, nil, kit, false)
+            personal.number = personal.rig.numberValue
+            if personal~=player then P.Character.applyUniform(player.rig,kit,false) end
         else
             P.Character.applyUniform(player.rig, kit, false)
         end
     end
+    if match.specialistShift and not match.careerOnBench then
+        P.Character.applyUniform(match.specialistShift.idle.rig,match.kits[1],false)
+    end
 end
+
+function Match.careerAthlete(match)
+    if match.careerOnBench then return match.specialistShift.idle end
+    return match.squad[match.careerPlayer]
+end
+
+local midfieldRoles = {FO="FOGO",FOGO="FOGO",FACEOFF="FOGO",LSM="LSM",SSDM="SSDM"}
 
 function Match.new(scene, profile, homeId, awayId, rules)
     rules = rules or {}
@@ -290,13 +308,13 @@ function Match.new(scene, profile, homeId, awayId, rules)
             local role = spec[1]
             local chosenRole = human and human.role or selected and selected.role
                 or index == match.careerPlayer and rules.careerPlayerRole
-            if role == "M" and (chosenRole == "LSM" or chosenRole == "SSDM") then
-                role = chosenRole
+            if role == "M" then
+                role = midfieldRoles[chosenRole] or (slot==4 and not chosenRole and "FOGO") or role
             end
             local long = role == "D" and slot-6 <= settings.maxLongPoles
-                or role == "LSM" and settings.maxLongPoles >= 4 and not (lineup and specialistPole)
+                or role == "LSM" and settings.maxLongPoles >= 4 and not specialistPole
             if role == "LSM" and long then specialistPole = true end
-            P.Character.setStickType(rig, long and "long" or "short")
+            P.Character.setStickType(rig, role=="G" and "goalie" or long and "long" or "short")
             if member and member.number and not custom then appearance.NUMBER=member.number+1 end
             P.Character.apply(rig, appearance, nil, match.kits[team], false)
             local homeDepth = spec[1] == "G" and -(field.goalZ-1.4) or spec[4]
@@ -330,6 +348,9 @@ function Match.new(scene, profile, homeId, awayId, rules)
             match.teams[team][slot] = index
             if player.role == "G" then match.keepers[team] = index end
         end
+    end
+    if rules.careerShift and match.careerPlayer then
+        match.specialistShift = P.SpecialistShift.new(match,scene,rules.careerShift,playerProfile(1,match.careerPlayer))
     end
     match.screenStat = function(id,key,detail) screenStat(match,id,key,detail) end
     match.screenCallbacks = {stat=match.screenStat,
@@ -468,7 +489,7 @@ function Match.command(match, action, moveX, moveZ, aim, actorId)
         resetMatch(match)
         return
     end
-    if match.careerWaiting then return end
+    if match.careerWaiting or match.careerOnBench or match.specialistShift and match.specialistShift.going then return end
     local controlled = actorId or match.controlled
     if match.phase == "FACEOFF" then
         if match.humans and controlled ~= match.faceoff.home.id then return end
@@ -514,7 +535,7 @@ function Match.command(match, action, moveX, moveZ, aim, actorId)
     end
 end
 
-local function proposeMovement(match, player, vx, vz, dt, proposal)
+local function proposeMovement(match, player, vx, vz, dt, proposal, shiftGate)
     local dodge = player.dodge
     local acceleration = 24+(P.Attributes.rating(player,"acceleration",60)-60)*.18
     local exit = player.faceoffExit
@@ -535,7 +556,8 @@ local function proposeMovement(match, player, vx, vz, dt, proposal)
     local speedup = math.min(1, acceleration * dt / math.max(distance(dx, dz), .001))
     local x, z = player.x, player.z
     local field = match.field
-    local targetX = clamp(x + (player.vx + dx * speedup) * dt, -.987 * field.halfWidth, .987 * field.halfWidth)
+    local rightLimit = shiftGate and field.halfWidth+.4 or .987*field.halfWidth
+    local targetX = clamp(x + (player.vx + dx * speedup) * dt, -.987 * field.halfWidth, rightLimit)
     local targetZ = clamp(z + (player.vz + dz * speedup) * dt, -.991 * field.halfLength, .991 * field.halfLength)
     -- Keep opposing field players out of the defending crease.
     if player.role ~= "G" then
@@ -567,7 +589,7 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
     local cut = P.Tactics.activeCut(match)
     local movementIntents = {}
     local proposals = match.movementProposals
-    local humanID = not match.careerWaiting and match.controlled
+    local humanID = not careerOffField(match,match.controlled) and match.controlled
     for _, player in ipairs(match.squad) do
         local intent = P.Screens.intent(match,player.id,intents[player.id] or {})
         movementIntents[player.id] = intent
@@ -578,7 +600,7 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
         if control then inputX,inputZ,sprint = control.x or 0,control.z or 0,control.sprint end
         local tx,tz = intent.x,intent.z
         local receiveX,receiveZ = P.Passing.receiveTarget(match,player.id)
-        if not intent.screenControl then
+        if not (intent.screenControl or intent.shiftGate) then
             if receiveX then
                 tx,tz = receiveX,receiveZ
             elseif cut and cut.cutID==player.id and not match.pending then
@@ -587,7 +609,7 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
         end
         local guided = not match.humans and (receiveX or (cut and cut.cutID==player.id and not match.pending))
         local vx,vz = 0,0
-        if human and not intent.screenControl and (not guided or distance(inputX,inputZ)>.12) then
+        if human and not intent.screenControl and not intent.shiftGate and (not guided or distance(inputX,inputZ)>.12) then
             local rate = sprint and 1.18 or 1
             local pace = P.Attributes.pace(player,8.8) * (intent.screenDrag or 1)
             vx,vz = inputX*pace*rate,-inputZ*pace*rate
@@ -600,7 +622,7 @@ local function movePlayers(match, dt, moveX, moveZ, intents)
                 vx,vz = speed*dx/gap,speed*dz/gap
             end
         end
-        proposeMovement(match,player,vx,vz,dt,proposals[player.id])
+        proposeMovement(match,player,vx,vz,dt,proposals[player.id],intent.shiftGate)
     end
 
     -- Apply both teams' steps together so a legal midfield exchange does not
@@ -1122,10 +1144,11 @@ local function live(match, dt, moveX, moveZ)
     end
     local intents = P.MatchAI.update(match, dt)
     pursueDraw(match, intents, dt)
+    if match.specialistShift then P.SpecialistShift.plan(match,intents,dt) end
     act(match, intents)
     P.Passing.scheduleCatch(match,match.flight,dt)
     if match.flight then P.Defense.prepareIntercept(match, match.flight) end
-    if match.loose and not match.careerWaiting then
+    if match.loose and not (match.careerWaiting or match.careerOnBench) then
         if match.humans then
             for _, player in ipairs(match.squad) do
                 if humanControls(match,player.id) then startScoop(match,player) end
@@ -1135,6 +1158,9 @@ local function live(match, dt, moveX, moveZ)
         end
     end
     movePlayers(match, dt, moveX, moveZ, intents)
+    if match.specialistShift and P.SpecialistShift.complete(match) then
+        announce(match,match.careerOnBench and "SUBSTITUTED · ON THE BENCH" or "YOUR SHIFT",2)
+    end
     local holder, offender = match.squad[match.carrier], match.squad[match.controlled]
     if match.humans then
         for _, player in ipairs(match.squad) do
@@ -1147,7 +1173,7 @@ local function live(match, dt, moveX, moveZ)
     end
     local crossing = match.positioning.blocked[offender.id]
     if match.rules.profile ~= "arcade" and crossing and crossing.reason == "minimum"
-        and holder and offender.team == holder.team and not match.careerWaiting then
+        and holder and offender.team == holder.team and not careerOffField(match,offender.id) then
         Match.recordStat(match,holder.id,"turnovers")
         P.Statistics.turnover(match,holder.id,"offsides")
         Match.recordStat(match,offender.id,"fouls")

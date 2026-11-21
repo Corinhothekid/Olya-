@@ -19,12 +19,14 @@ local sections = {
     {"WHEEL","Gold Wheel","Spin for one player","wheel"},
     {"SBC","Squad Building","Challenges · SBC","sbc"},
     {"COLLECTION","My Collection","Browse owned cards","collection"},
-    {"VAULT","Jersey Vault","Choose an original kit","jersey"}
+    {"VAULT","Jersey Vault","Choose an original kit","jersey"},
+    {"RECORD","Club Record","Results and box scores","record"}
 }
 local titles = {
     DASHBOARD="Ultimate Team", SQUAD="My Squad", PICK="Select Player",
     PACKS="Player Packs", WHEEL="Gold Wheel", COLLECTION="My Collection",
-    VAULT="Jersey Vault"
+    VAULT="Jersey Vault", RECORD="Club Record", DEV="Developer Testing",
+    DEV_CONFIRM="Reset Test Progress"
 }
 local roleNames = {A="Attack",M="Midfield",D="Defense",G="Goalie"}
 local colors = {
@@ -110,6 +112,19 @@ local function icon(kind,x,y,s,tint)
         line(x+s*.27,y,x-s*.2,y+s*.23)
         line(x-s*.2,y+s*.23,x-s*.2,y-s*.23)
         noStroke()
+    elseif kind=="record" or kind=="dev" then
+        for n=0,2 do
+            local h=s*(.24+n*.15)
+            round(x+(n-1)*s*.19,y-s*.29+h*.5,s*.105,h,2,tint)
+        end
+    elseif kind=="stick" then
+        stroke(tint)
+        strokeWidth(1.5)
+        noFill()
+        ellipse(x+s*.13,y+s*.18,s*.43,s*.38)
+        line(x+s*.01,y+s*.03,x-s*.26,y-s*.31)
+        line(x+s*.11,y+s*.32,x+s*.24,y+s*.09)
+        noStroke()
     end
 end
 
@@ -156,8 +171,7 @@ end
 
 local function dashboard(ui,l)
     local room=l.body-l.floor
-    local hero=math.min(104,room*.27)
-    local row=math.min(78,(room-hero-32)/3)
+    local hero=math.min(104,room*.26)
     local profile=ui.profile
     local title=ui.pendingResult and "Retry Result" or (ui.activeMatch and "Resume Match" or "Play Match")
     local record=string.format("10v10 vs CPU   ·   %dW  %dD  %dL",profile.wins,profile.draws,profile.losses)
@@ -172,10 +186,16 @@ local function dashboard(ui,l)
     item(l,"PLAY",title,l.x,l.body-hero*.5,l.w,hero,
         {kind="hero",icon="play",detail=detail,latest=latest})
     local col=(l.w-8)*.5
-    for index,menu in ipairs(sections) do
+    local rows=math.ceil(#sections/2)
+    local row=math.min(78,(room-hero-12-(rows-1)*8)/rows)
+    local function dashboardItem(index,menu)
         local x=l.x+(index%2==1 and -1 or 1)*(col+8)*.5
         local y=l.body-hero-12-row*.5-(math.ceil(index/2)-1)*(row+8)
         item(l,menu[1],menu[2],x,y,col,row,{kind="menu",detail=menu[3],icon=menu[4]})
+    end
+    for index,menu in ipairs(sections) do dashboardItem(index,menu) end
+    if P.Ultimate.isDeveloperBuild() then
+        dashboardItem(#sections+1,{"DEV","Developer Testing","Private save","dev"})
     end
 end
 
@@ -185,7 +205,8 @@ end
 
 local function cardData(PU,player)
     local rating=PU.Economy.rating(player)
-    return {name=PU.displayName(player),rating=rating,role=player.position or PU.role(player),tier=cardTier(rating)}
+    return {name=PU.displayName(player),rating=rating,role=player.position or PU.role(player),
+        league=player.league,season=player.season,tier=cardTier(rating)}
 end
 
 local function formation(ui,l)
@@ -239,7 +260,7 @@ local function listCards(ui,l)
     for slot,uid in pairs(ui.profile.squad) do
         assigned[uid]=slot
         local player=U.resolveCard(ui.profile,uid)
-        if player then assignedPlayers[player.id]=slot end
+        if player then assignedPlayers[U.identity(player)]=slot end
     end
     for _,owned in ipairs(ownedCards(ui,U)) do
         if not wanted or wanted==U.role(owned.player) then
@@ -274,7 +295,7 @@ local function listCards(ui,l)
         if not owned then break end
         local x=l.x+(index%2==1 and -1 or 1)*(w+8)*.5
         local y=top-rowH*.5-math.floor((index-1)/2)*(rowH+8)
-        local inSlot=picked and assignedPlayers[owned.id] or assigned[owned.uid]
+        local inSlot=picked and assignedPlayers[U.identity(owned.player)] or assigned[owned.uid]
         local used=inSlot and (picked and inSlot~=ui.slot and "In slot "..inSlot or "Starting ten") or nil
         local data=cardData(U,owned.player)
         item(l,"CARD:"..owned.uid,data.name,x,y,w,rowH,{
@@ -316,9 +337,6 @@ local function packs(ui,l)
         detail=number(c.unopenedPacks).." available"}
     rows[#rows+1]={id="BUY_PACK",title="Buy Standard Pack",enabled=(c.coins or 0)>=E.packCost,
         detail=number(E.packCost).." gold"}
-    if E.canGrantTestGold(c) then
-        rows[#rows+1]={id="TEST_GOLD",title="Grant Developer Gold",detail="Local test profile · one-time grant"}
-    end
     local row=math.min(48,(top-l.floor-7*(#rows-1))/#rows)
     for index,data in ipairs(rows) do
         item(l,data.id,data.title,l.x,top-row*.5-(index-1)*(row+7),l.w,row,data)
@@ -358,9 +376,47 @@ local function vault(ui,l)
     end
 end
 
+local function record(ui,l)
+    local profile=ui.profile
+    l.caption=string.format("%d played  ·  %d wins  ·  %d draws  ·  %d losses",
+        profile.matches,profile.wins,profile.draws,profile.losses)
+    local history=profile.matchHistory
+    if #history==0 then l.empty="Complete a match to see your results here." return end
+    local row=52
+    local size=math.max(1,math.floor((l.body-24-l.floor-38)/row))
+    local pages=math.ceil(#history/size)
+    ui.listPage=math.min(pages,ui.listPage)
+    if pages>1 then pageControls(ui,l,pages) end
+    for i=1,size do
+        local entry=history[#history-(ui.listPage-1)*size-i+1]
+        if not entry then break end
+        local score=entry.ownScore and entry.opponentScore
+            and string.format("  %d–%d",entry.ownScore,entry.opponentScore) or ""
+        item(l,"RESULT:"..entry.id,entry.result:upper()..score,l.x,l.body-43-(i-1)*row,l.w,row-5,{
+            detail="+"..number(entry.payout).." gold  ·  "..(entry.box and "View box score" or "Earlier result"),
+            boxScore=entry.box,interactive=entry.box~=nil
+        })
+    end
+end
+
+local function dev(ui,l)
+    local E=P.Ultimate.Economy
+    l.caption="Private Ultimate Team save"
+    item(l,"TEST_GOLD","Grant 1,000,000 Gold",l.x,l.body-54,l.w,54,
+        {enabled=E.canGrantTestGold(ui.profile),detail=ui.profile.testGoldGranted and "Already claimed" or "One-time grant"})
+    item(l,"DEV_RESET","Reset Test Progress",l.x,l.body-119,l.w,54,
+        {enabled=not ui.activeMatch and not ui.pendingResult,detail="One-time grant status is retained"})
+end
+
+local function devConfirm(_,l)
+    l.caption="Clear this private collection, gold, and records?"
+    l.empty="Your one-time gold claim stays recorded."
+    item(l,"DEV_CONFIRM","Reset Private Save",l.x,l.body-77,l.w,49)
+end
+
 local layouts={
     DASHBOARD=dashboard,SQUAD=formation,PACKS=packs,WHEEL=wheel,
-    PICK=listCards,COLLECTION=listCards,VAULT=vault
+    PICK=listCards,COLLECTION=listCards,VAULT=vault,RECORD=record,DEV=dev,DEV_CONFIRM=devConfirm
 }
 
 function UI.layout(ui)
@@ -391,10 +447,16 @@ local function drawCard(box,selected,progress)
         label(tostring(card.rating),x-w*.23,top,ratingSize,theme.border)
         local role = box.slot==4 and "FO" or card.position or card.role
         label(role or "",x+w*.24,top,tiny and 11 or 13,theme.border,w*.40)
+        if not tiny and h>=96 then icon("stick",x,y+h*.08,h*.28,theme.border) end
         label(card.name,x,y-h*.09,tiny and 10 or 13,ink.white,w-10)
         local footer=box.status
-        if not tiny and not footer then footer=theme.label.." · Dev rating" end
-        label(footer,x,y-h*.32,9,ink.muted,w-10)
+        if not tiny then
+            local edition=card.league or ""
+            if card.season then edition=edition.." "..tostring(card.season) end
+            local description=edition~="" and edition.." · "..theme.label or theme.label
+            label(description,x,y-h*.32,9,theme.border,w-10)
+            label(footer,x,y-h*.45,8,ink.muted,w-10)
+        end
     else
         panel(x,y,w,h,{border=ink.fieldLine,base=ink.turf},press,8)
         label("+",x,y+h*.13,19,ink.green)
@@ -571,7 +633,7 @@ local function wheelGraphic(ui,l)
     line(x+7,y+r+6,x,y+r-5)
     noStroke()
     if l.winY and ui.reveal then
-        drawCard({x=x,y=l.winY,w=math.min(l.w-16,164),h=57,card=ui.reveal.cards[1],kind="formation"},false)
+        drawCard({x=x,y=l.winY,w=math.min(l.w-16,164),h=66,card=ui.reveal.cards[1]},false)
     end
 end
 
@@ -610,6 +672,9 @@ function UI.draw(ui,dt)
     if ui.page=="WHEEL" then wheelGraphic(ui,l) end
     oddsStrip(l)
     for _,box in ipairs(l.items) do drawBox(ui,box) end
+    if ui.page=="PACKS" or ui.page=="WHEEL" or ui.page=="COLLECTION" or ui.page=="PICK" then
+        label("Fictional PolyLax ratings",l.x,l.bottom+11,10,ink.muted,l.w)
+    end
     if ui.messageTime>0 and ui.messageText then
         panel(l.x,l.bottom+12,l.w,28,borderGold,nil,8)
         label(ui.messageText,l.x,l.bottom+12,11,ink.gold,l.w-11)
@@ -653,6 +718,7 @@ end
 local function back(ui)
     if ui.page=="DASHBOARD" then return "HOME" end
     if ui.page=="PICK" then gotoPage(ui,"SQUAD")
+    elseif ui.page=="DEV_CONFIRM" then gotoPage(ui,"DEV")
     else gotoPage(ui,"DASHBOARD") end
 end
 
@@ -679,6 +745,12 @@ local actions={
         local ok,reason=P.Ultimate.Economy.grantTestGold(ui.profile)
         UI.message(ui,ok and "Developer gold granted." or reason)
     end,
+    DEV_RESET=function(ui) gotoPage(ui,"DEV_CONFIRM") end,
+    DEV_CONFIRM=function(ui)
+        local ok,reason=P.Ultimate.Economy.resetTestProgress(ui.profile)
+        if ok then gotoPage(ui,"DEV") end
+        UI.message(ui,ok and "Private progress reset." or reason)
+    end,
     SBC=function(ui)
         gotoPage(ui,"SBC")
         ui.sbc=P.Ultimate.SBCUI.new(ui.profile)
@@ -689,7 +761,9 @@ local function select(ui,box)
     local id=box.id
     if actions[id] then return actions[id](ui) end
     local U=P.Ultimate
-    if box.slot then
+    if box.boxScore then
+        return "BOX_SCORE",box.boxScore
+    elseif box.slot then
         ui.slot=box.slot
         gotoPage(ui,"PICK")
     elseif box.uid then

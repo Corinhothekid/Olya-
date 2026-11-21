@@ -75,8 +75,8 @@ local weights = {
 }
 
 local roleIndex = {
-    A=1, ATTACK=1, M=2, MIDFIELD=2, D=3, DEFENSE=3,
-    F=4, FO=4, FACEOFF=4, G=5, GOALIE=5, KEEPER=5, LSM=6, SSDM=7
+    A=1, ATT=1, ATTACK=1, M=2, MID=2, MIDFIELD=2, D=3, DEFENSE=3, ["D-POLE"]=3,
+    F=4, FO=4, FOGO=4, FACEOFF=4, G=5, GOALIE=5, KEEPER=5, LSM=6, SSDM=7
 }
 
 local function position(role)

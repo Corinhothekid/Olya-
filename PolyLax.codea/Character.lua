@@ -673,7 +673,8 @@ end
 
 local stickSizes = {
     short = {extension=0, butt=-.923, lowerGrip=-.37},
-    long = {extension=.46, butt=-1.36, lowerGrip=-.48}
+    long = {extension=.46, butt=-1.36, lowerGrip=-.48},
+    goalie = {extension=.05, butt=-.95, lowerGrip=-.39, pocketY=.85, pocketZ=-.123}
 }
 
 local function shaft(mesh, size)
@@ -685,6 +686,46 @@ local function shaftTape(mesh, size)
     bar(mesh, V(0, size.lowerGrip - .098, 0), V(0, size.lowerGrip + .064, 0), .032, 8)
     bar(mesh, V(0, -.069, 0), V(0, .118, 0), .032, 8)
     bar(mesh, V(0, size.butt - .036, 0), V(0, size.butt - .001, 0), .043, 8)
+end
+
+local goalieRim = {
+    {.46,.064,-.02}, {.55,.168,-.04}, {.69,.276,-.059},
+    {.86,.347,-.084}, {1.02,.352,-.112}, {1.14,.249,-.135}, {1.20,.116,-.149}
+}
+
+local function goalieHead(mesh)
+    loft(mesh, {{.394,.040,.037},{.461,.055,.044},{.521,.069,.049,-.030}}, 8)
+    for _, side in ipairs({-1,1}) do
+        local outer, inner = {}, {}
+        for _, point in ipairs(goalieRim) do
+            local y, x, z = point[1], point[2], point[3]
+            outer[#outer+1], inner[#inner+1] = V(side*x,y,z), V(side*(x-.019),y+.004,z+.040)
+            bar(mesh,outer[#outer],inner[#inner],.014,6)
+        end
+        rail(mesh,.025,outer,7)
+        rail(mesh,.015,inner,6)
+    end
+    rail(mesh,.024,{V(-.116,1.20,-.149),V(0,1.223,-.156),V(.116,1.20,-.149)},7)
+end
+
+local function goaliePocket(mesh)
+    local function knot(row, fraction)
+        return V(row[2]*fraction,row[1],row[3]+.122*(1-fraction*fraction))
+    end
+    for band=1,#goalieRim-1 do
+        for i=-4,4 do
+            local point = knot(goalieRim[band],i/4)
+            for _, step in ipairs({-1,1}) do
+                if math.abs(i+step)<=4 then
+                    bar(mesh,point,knot(goalieRim[band+1],(i+step)/4),.005,4)
+                end
+            end
+        end
+    end
+    for band=4,5 do
+        rail(mesh,.009,{knot(goalieRim[band],-1),knot(goalieRim[band],-.5),
+            knot(goalieRim[band],0),knot(goalieRim[band],.5),knot(goalieRim[band],1)},5)
+    end
 end
 
 local function makeStick(r)
@@ -747,20 +788,24 @@ local function makeStick(r)
             rail(mesh, .009, points, 5)
         end
     end, parts)
+    r.fieldStickHeadModel, r.fieldStickPocketModel = r.stickHead.model, r.stickMesh.model
 end
 
 -- Keep the upper grip at the stick origin. Move the pocket, head and mesh
 -- together so possessions and release points follow the visible equipment.
 function Character.setStickType(rig, kind)
-    if kind ~= "long" then kind = "short" end
+    if not stickSizes[kind] then kind = "short" end
     if kind == rig.stickType then return end
     local size = stickSizes[kind]
-    rig.stickType, rig.stickReachExtension = kind, size.extension
+    local goalie = kind == "goalie"
+    rig.stickType, rig.stickReachExtension = kind, goalie and 0 or size.extension
     rig.stickShaft.model = model("stick alloy "..kind, function(mesh) shaft(mesh,size) end)
     rig.stickTape.model = model("stick tape "..kind, function(mesh) shaftTape(mesh,size) end)
-    rig.stickHead.position = V(0,size.extension,0)
-    rig.stickMesh.position = V(0,size.extension,0)
-    rig.pocket.position = V(0,.70+size.extension,-.10)
+    rig.stickHead.model = goalie and model("goalie stick scoop",goalieHead) or rig.fieldStickHeadModel
+    rig.stickMesh.model = goalie and model("goalie deep pocket",goaliePocket) or rig.fieldStickPocketModel
+    local offset = goalie and 0 or size.extension
+    rig.stickHead.position, rig.stickMesh.position = V(0,offset,0), V(0,offset,0)
+    rig.pocket.position = V(0,size.pocketY or .70+size.extension,size.pocketZ or -.10)
     rig.lowerGrip.position = V(0,size.lowerGrip,0)
 end
 

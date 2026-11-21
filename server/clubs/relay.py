@@ -23,8 +23,9 @@ PRESENCE_SECONDS = 12
 CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 STAGES = {"highSchool", "college", "professional"}
 POSITION_NAMES = {
-    "attack": 1, "a": 1, "midfield": 2, "m": 2, "defense": 3, "d": 3,
-    "faceoff": 4, "f": 4, "fo": 4, "goalie": 5, "g": 5,
+    "attack": 1, "a": 1, "att": 1, "midfield": 2, "mid": 2, "m": 2,
+    "defense": 3, "d": 3, "dpole": 3, "faceoff": 4, "f": 4, "fo": 4, "fogo": 4,
+    "goalie": 5, "g": 5,
     "lsm": 6, "longstickmid": 6, "longstickmidfield": 6,
     "ssdm": 7, "shortstickdefmid": 7,
 }
@@ -49,7 +50,10 @@ CREATE TABLE IF NOT EXISTS rooms (
     match_id TEXT,
     snapshot TEXT,
     snapshot_seq INTEGER NOT NULL DEFAULT -1,
-    result TEXT
+    result TEXT,
+    last_result TEXT,
+    reopened_match_id TEXT,
+    revision INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS members (
     id TEXT PRIMARY KEY,
@@ -226,6 +230,17 @@ class Relay:
         self.database = database
         with self.transaction() as db:
             db.executescript(SCHEMA)
+        # Old databases retain their room codes, token digests and members.
+        # executescript commits, so acquire a fresh write transaction for migration.
+        with self.transaction() as db:
+            columns = {column["name"] for column in db.execute("PRAGMA table_info(rooms)")}
+            if "last_result" not in columns:
+                db.execute("ALTER TABLE rooms ADD COLUMN last_result TEXT")
+                db.execute("UPDATE rooms SET last_result=result WHERE phase='final' AND result IS NOT NULL")
+            if "reopened_match_id" not in columns:
+                db.execute("ALTER TABLE rooms ADD COLUMN reopened_match_id TEXT")
+            if "revision" not in columns:
+                db.execute("ALTER TABLE rooms ADD COLUMN revision INTEGER NOT NULL DEFAULT 0")
 
     @contextmanager
     def transaction(self):
@@ -257,9 +272,13 @@ class Relay:
         players = [{"id": member["id"], "slot": member["slot"], "ready": bool(member["ready"]),
                     "connected": member["last_seen"] >= recent, "profile": json.loads(member["profile"])}
                    for member in self.members(db, code)]
-        return {"code": code, "name": room["name"], "team": json.loads(room["team"]), "stage": room["stage"],
-                "phase": room["phase"], "hostId": room["host_id"], "players": players,
-                "matchId": room["match_id"], "result": json.loads(room["result"]) if room["result"] else None}
+        return {
+            "code": code, "name": room["name"], "team": json.loads(room["team"]), "stage": room["stage"],
+            "phase": room["phase"], "hostId": room["host_id"], "players": players,
+            "matchId": room["match_id"], "result": json.loads(room["result"]) if room["result"] else None,
+            "lastResult": json.loads(room["last_result"]) if room["last_result"] else None,
+            "revision": room["revision"],
+        }
 
     def new_member(self, db, code, player_id, profile):
         token = secrets.token_urlsafe(32)
@@ -321,16 +340,67 @@ class Relay:
         if member["id"] != room["host_id"]:
             raise RelayError(403, "host_required", "Only the host may do that")
 
+    def update_profile(self, db, member, room, raw):
+        profile = profile_data(raw)
+        previous = json.loads(member["profile"])
+        if profile["id"] != previous["id"]:
+            conflict("The profile ID does not match this member")
+        if profile == previous:
+            return
+        if room["phase"] == "match":
+            conflict("Player changes apply after the match")
+        members = [dict(item) for item in self.members(db, room["code"])]
+        next_member = next(item for item in members if item["id"] == member["id"])
+        next_member["position"] = profile["position"]
+        slots = find_slots(members)
+        db.execute("UPDATE members SET profile=?,position=?,ready=0 WHERE id=?",
+                   (encode(profile), profile["position"], member["id"]))
+        for item in members:
+            slot = slots[item["id"]]
+            if slot != item["slot"]:
+                db.execute("UPDATE members SET slot=?,ready=0 WHERE id=?", (slot, item["id"]))
+
+    def reopen(self, db, data, member, room):
+        self.host_only(member, room)
+        match_id = safe_text(data.get("matchId"), "Match ID", 72)
+        abandon = data.get("abandon", False)
+        if not isinstance(abandon, bool):
+            invalid("abandon must be true or false")
+        code = room["code"]
+        if room["phase"] == "lobby" and match_id == room["reopened_match_id"]:
+            return {"lobby": self.lobby(db, code), "inputSeq": -1}
+        if match_id != room["match_id"]:
+            conflict("The lobby has moved on to another match")
+        if room["phase"] == "match" and not abandon:
+            conflict("Finish or abandon the current match before reopening")
+        db.execute("""UPDATE rooms SET phase='lobby',match_id=NULL,snapshot=NULL,snapshot_seq=-1,
+                   result=NULL,reopened_match_id=?,revision=revision+1 WHERE code=?""", (match_id, code))
+        db.execute("UPDATE members SET ready=0,last_input=-1 WHERE room=?", (code,))
+        db.execute("DELETE FROM inputs WHERE room=?", (code,))
+        return {"lobby": self.lobby(db, code), "inputSeq": -1}
+
     def sync(self, db, data, member, room):
         code = room["code"]
         host = member["id"] == room["host_id"]
         snapshot = data.get("snapshot")
-        committed_snapshot = False
+        raw_input = data.get("input")
         if snapshot is not None:
             self.host_only(member, room)
+            snapshot = safe_object(snapshot, "snapshot")
+        match_id = data.get("matchId")
+        if match_id is None and snapshot is not None:
+            match_id = snapshot.get("matchId")
+        if match_id is not None and match_id != room["match_id"]:
+            conflict("This request is for a different match")
+        if room["revision"] > 0 and room["phase"] == "match" and match_id is None and (
+            raw_input is not None or snapshot is not None
+        ):
+            conflict("A match ID is required after the lobby reopens")
+
+        committed_snapshot = False
+        if snapshot is not None:
             if room["phase"] != "match":
                 conflict("Snapshots are accepted only during a match")
-            snapshot = safe_object(snapshot, "snapshot")
             seq = safe_int(snapshot.get("seq"), "snapshot sequence", 0, MAX_SEQUENCE)
             if snapshot.get("matchId", room["match_id"]) != room["match_id"]:
                 conflict("Snapshot is for a different match")
@@ -339,7 +409,6 @@ class Relay:
                 committed_snapshot = True
                 room = self.room(db, code)
 
-        raw_input = data.get("input")
         last_input = member["last_input"]
         # A guest may send one last in-flight input before seeing the final.
         if raw_input is not None and room["phase"] != "final":
@@ -376,9 +445,23 @@ class Relay:
         if action == "sync":
             return self.sync(db, data, member, room)
         if action == "resume":
+            profile_error = None
+            if "profile" in data:
+                try:
+                    self.update_profile(db, member, room, data["profile"])
+                except RelayError as error:
+                    profile_error = str(error)
             state = self.sync(db, {}, member, room)
             state["session"] = {"roomCode": code, "playerId": member["id"], "token": token}
+            if profile_error:
+                state["profileError"] = profile_error
             return state
+        if action == "reopen":
+            return self.reopen(db, data, member, room)
+        if action in ("start", "ready") and "revision" in data:
+            revision = safe_int(data["revision"], "lobby revision", 0, MAX_SEQUENCE)
+            if revision != room["revision"]:
+                conflict("This lobby has changed. Refresh and try again")
         if action == "ready":
             ready = data.get("ready")
             if not isinstance(ready, bool):
@@ -403,34 +486,37 @@ class Relay:
             result = safe_object(data.get("result"), "result")
             if result.get("matchId") != room["match_id"] or room["match_id"] is None:
                 conflict("Result is for a different match")
+            if room["phase"] == "final":
+                if json.loads(room["result"]) != result:
+                    conflict("This match cannot accept a new result")
+                return {"lobby": self.lobby(db, code)}
             for side in ("homeScore", "awayScore"):
                 safe_int(result.get(side), side, 0, 999)
             stats = safe_object(result.get("stats"), "stats")
             members = {item["id"] for item in self.members(db, code)}
             if set(stats) != members or any(not isinstance(line, dict) for line in stats.values()):
                 invalid("Result statistics must include each club member")
-            if room["phase"] == "match":
-                snapshot = json.loads(room["snapshot"]) if room["snapshot"] else {}
-                if snapshot.get("phase") != "FINAL" or snapshot.get("matchId") != room["match_id"] or any(
-                    snapshot.get(side) != result[side] for side in ("homeScore", "awayScore")
-                ):
-                    conflict("Send the final match snapshot before recording results")
-                db.execute("UPDATE rooms SET phase='final',result=? WHERE code=?", (encode(result), code))
-                db.execute("DELETE FROM inputs WHERE room=?", (code,))
-            elif room["phase"] != "final" or json.loads(room["result"]) != data["result"]:
-                conflict("This match cannot accept a new result")
+            snapshot = json.loads(room["snapshot"]) if room["snapshot"] else {}
+            if room["phase"] != "match" or snapshot.get("phase") != "FINAL" or (
+                snapshot.get("matchId") != room["match_id"]
+                or any(snapshot.get(side) != result[side] for side in ("homeScore", "awayScore"))
+            ):
+                conflict("Send the final match snapshot before recording results")
+            final = encode(result)
+            db.execute("UPDATE rooms SET phase='final',result=?,last_result=? WHERE code=?", (final, final, code))
+            db.execute("DELETE FROM inputs WHERE room=?", (code,))
         elif action == "leave":
-            if room["phase"] == "match":
-                db.execute("UPDATE members SET last_seen=0 WHERE id=?", (member["id"],))
-                return {"left": False, "disconnected": True, "lobby": self.lobby(db, code)}
-            if room["phase"] == "final":
-                # An offline guest can still fetch the final after the host leaves.
-                db.execute("UPDATE members SET last_seen=0 WHERE id=?", (member["id"],))
-                return {"left": True}
-            if member["id"] == room["host_id"]:
-                db.execute("DELETE FROM rooms WHERE code=?", (code,))
-            else:
+            withdraw = data.get("withdraw", False)
+            if not isinstance(withdraw, bool):
+                invalid("withdraw must be true or false")
+            if withdraw:
+                if member["id"] == room["host_id"] or room["phase"] == "match":
+                    conflict("This membership cannot be withdrawn now")
                 db.execute("DELETE FROM members WHERE id=?", (member["id"],))
+                return {"left": True}
+            db.execute("UPDATE members SET last_seen=0,ready=0 WHERE id=?", (member["id"],))
+            if room["phase"] == "match":
+                return {"left": False, "disconnected": True, "lobby": self.lobby(db, code)}
             return {"left": True}
         return {"lobby": self.lobby(db, code)}
 
@@ -489,7 +575,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(404, {"code": "not_found", "error": "Unknown endpoint", "message": "Unknown endpoint"})
 
     def do_POST(self):
-        route = re.fullmatch(r"/v1/(create|join|resume|ready|start|leave|sync|finish)", self.path)
+        route = re.fullmatch(r"/v1/(create|join|resume|ready|start|leave|sync|finish|reopen)", self.path)
         if not route:
             self.reply(404, {"code": "not_found", "error": "Unknown endpoint", "message": "Unknown endpoint"})
             return

@@ -27,7 +27,7 @@ local function eligiblePools()
         local pool = {}
         for _, player in ipairs(U.players) do
             local rating = E.rating(player)
-            if player.verification ~= "pending" and type(rating) == "number"
+            if U.isCollectible(player) and type(rating) == "number"
                 and rating >= tier.minimum and rating <= tier.maximum then
                 pool[#pool+1] = player
             end
@@ -52,7 +52,7 @@ local function draw(pools, rng, minimumRating)
                 local player = pool[rng(1, #pool)]
                 return {
                     id=player.id, name=U.displayName(player), position=player.position, role=U.role(player),
-                    league=player.league, rating=E.rating(player), tier=tier.tier
+                    league=player.league, season=player.season, rating=E.rating(player), tier=tier.tier
                 }
             end
         end
@@ -136,6 +136,18 @@ function E.grantTestGold(collection)
     end)
 end
 
+function E.resetTestProgress(collection)
+    if not developerBuild then return false, "Developer mode disabled" end
+    return U.transact(collection, function(draft)
+        local fresh = U.defaultCollection()
+        fresh.testGoldGranted = draft.testGoldGranted
+        fresh.nextMatchId, fresh.nextCardId = draft.nextMatchId, draft.nextCardId
+        for key in pairs(draft) do draft[key] = nil end
+        for key, value in pairs(fresh) do draft[key] = value end
+        return true
+    end)
+end
+
 function E.beginMatch(collection)
     return U.transact(collection, function(draft)
         local id = draft.nextMatchId
@@ -153,7 +165,7 @@ function E.abandonMatch(collection, id)
     end)
 end
 
-function E.recordMatch(collection, result, id, ownScore, opponentScore)
+function E.recordMatch(collection, result, id, ownScore, opponentScore, boxScore)
     local payout = E.matchRewards[result]
     if not payout then return false, "Invalid match result" end
     if not id or collection.activeMatch ~= id then return false, "Match is no longer active" end
@@ -166,6 +178,10 @@ function E.recordMatch(collection, result, id, ownScore, opponentScore)
         if actual ~= result then return false, "Result does not match score" end
     end
     local record = {id=id, result=result, payout=payout, ownScore=ownScore, opponentScore=opponentScore}
+    if boxScore then
+        record.box = U.resultBox(boxScore,id,ownScore,opponentScore)
+        if not record.box then return false,"Invalid final box score" end
+    end
     return U.transact(collection, function(draft)
         draft.coins = draft.coins + payout
         draft.matches = draft.matches + 1

@@ -172,6 +172,7 @@ function Gameplay.new(scene, profile, uniform, opponentId, statisticsOptions)
     end
 
     game.goalie = Character.new(scene)
+    Character.setStickType(game.goalie,"goalie")
     Character.apply(game.goalie, {
         FACE = 2, HAIR = 2, BODY = 3, HELMET = 3, JERSEY = 6,
         GLOVES = 4, SHORTS = 4, CLEATS = 4, STICK = 4, NUMBER = 1

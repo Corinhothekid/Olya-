@@ -116,22 +116,23 @@ local restored = U.load()
 assert(restored.completedSBC.starter_exchange and restored.coins==profile.coins)
 assert(restored.unopenedPacks==1 and restored.squad[10]==keeper and #U.ownedCards(restored)==1)
 
-local byLeague = {}
-for _, player in ipairs(U.players) do
-    byLeague[player.league] = byLeague[player.league] or {}
-    local team = byLeague[player.league]
-    team[#team+1] = player.id
+local eligibleLineups = {
+    starter_exchange={"pll_sowers_2026","pll_sowers_2026"},
+    field_specialists={"pll_sowers_2026","pll_king_2026","field_rex_kerr"},
+    box_experts={"box_remy_march","box_dane_costa","box_elio_tremblay"},
+    heritage={"heritage_wes_roux","heritage_owen_bridge","heritage_jude_cantu"},
+    cross_league={"pll_malone_2026","heritage_dev_wilder","field_aria_santos","heritage_jude_cantu"},
+    ultimate_mix={"pll_malone_2026","pll_holman_2026","box_arden_west","heritage_gael_price",
+        "field_des_banks","heritage_jude_cantu"}
+}
+local function lineup(challenger, ids)
+    local cards = {}
+    for slot, id in ipairs(ids) do cards[slot] = mint(challenger,id) end
+    return cards
 end
-local leagues = {"PLL","MLL","NLL"}
 for _, challenge in ipairs(SBC.challenges) do
-    local challenger, cards, previous = U.defaultCollection(), {}, {}
-    for slot=1,challenge.slots do
-        local league = challenge.rules.league or leagues[(slot-1)%#leagues+1]
-        local copyIndex = (previous[league] or 0)+1
-        previous[league] = copyIndex
-        local cardId = assert(byLeague[league] and byLeague[league][copyIndex])
-        cards[slot] = mint(challenger,cardId)
-    end
+    local challenger = U.defaultCollection()
+    local cards = lineup(challenger,eligibleLineups[challenge.id])
     local submitted, reward = SBC.submit(challenger,challenge.id,cards)
     assert(submitted,challenge.id)
     assert(reward.coins==challenge.reward.coins and reward.packs==challenge.reward.pack)
@@ -139,4 +140,31 @@ for _, challenge in ipairs(SBC.challenges) do
     assert(not SBC.submit(challenger,challenge.id,cards))
     assert(challenger.coins==challenge.reward.coins and challenger.unopenedPacks==challenge.reward.pack)
 end
-print("Ultimate SBC passed instance validation, league rules, review/cancel, atomic rewards, rollback, and reload.")
+
+local function rejectsRule(id, ids, expected, measure)
+    local challenger = U.defaultCollection()
+    local cards = lineup(challenger,ids)
+    local valid, reason, progress = SBC.validate(challenger,id,cards)
+    assert(not valid and reason:find(expected,1,true),reason)
+    if measure then measure(progress) end
+    assert(not SBC.submit(challenger,id,cards))
+    assert(#U.ownedCards(challenger)==#cards and challenger.coins==0)
+    assert(challenger.unopenedPacks==0 and not challenger.completedSBC[id])
+end
+rejectsRule("field_specialists",{"pll_sowers_2026","field_rex_kerr","pll_king_2026"},"Slot 2 needs MID")
+rejectsRule("box_experts",{"box_silas_voss","box_dane_costa","box_elio_tremblay"},"average OVR",
+    function(progress) assert(progress.ratingTotal==241 and progress.overall<82) end)
+rejectsRule("cross_league",{"pll_malone_2026","heritage_dev_wilder","field_aria_santos","box_mikael_dunn"},
+    "same-league pairs",function(progress) assert(progress.chemistry==1 and progress.leagues==3) end)
+rejectsRule("ultimate_mix",{"pll_malone_2026","heritage_wes_roux","box_arden_west","heritage_gael_price",
+    "field_des_banks","box_mikael_dunn"},"same-league pairs",
+    function(progress) assert(progress.chemistry==3 and progress.leagues==3) end)
+rejectsRule("ultimate_mix",{"pll_malone_2026","pll_holman_2026","box_arden_west","heritage_dev_wilder",
+    "field_des_banks","heritage_jude_cantu"},"Slot 4 needs FOGO")
+
+local picker = screen.new(U.defaultCollection())
+lineup(picker.collection,{"field_rex_kerr","pll_carroll_2026","box_arden_west","pll_sowers_2026"})
+assert(tap(picker,screen.layout(picker).next)=="next")
+assert(tap(picker,screen.layout(picker).slots[2])=="picker")
+assert(#picker.options==1 and picker.options[1].id=="pll_carroll_2026")
+print("Ultimate SBC passed all six challenges, role and league filters, exact OVR and chemistry, review/cancel, atomic rewards, rollback, and reload.")

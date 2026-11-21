@@ -93,8 +93,7 @@ local function applyCreatorProfile()
         personalColors=false
     end
     local careerPosition = athlete and P.Career.positions[athlete.position]
-    local long = careerPosition and (careerPosition.slot == 7 or careerPosition.role == "LSM")
-    P.Character.setStickType(state.creator.rig,long and "long" or "short")
+    P.Character.setStickType(state.creator.rig,careerPosition and careerPosition.stick or "short")
     P.Character.apply(state.creator.rig,creatorProfile(),selected,uniform,personalColors)
 end
 
@@ -122,7 +121,7 @@ end
 local function openClubs(view)
     state.clubs = state.clubs or P.Clubs.load()
     state.clubView, state.clubPage = view or "CLUBS", 1
-    state.clubEdit, state.clubMessage = nil, nil
+    state.clubEdit, state.clubMessage, state.clubConfirmRecover = nil, nil, nil
     openMenu("CLUBS")
 end
 
@@ -228,7 +227,9 @@ end
 local function statTouch(touch)
     local view=state.statView
     if P.StatsUI.touch(view,P.StatsUI.layout(view),touch)=="close" then
-        if state.statReturn == "ULTIMATE" then openUltimate() else navigate(state.statReturn) end
+        if state.statReturn == "ULTIMATE" then openUltimate()
+        elseif state.statReturn == "ULTIMATE_RECORD" then navigate("ULTIMATE")
+        else navigate(state.statReturn) end
         state.statView,state.statReturn=nil,nil
     end
 end
@@ -284,7 +285,7 @@ local function finishName()
             state.clubsCreator and saveClubPlayer or nil)
         local play=state.careerCreator and state.careerPlay
         if play then
-            local player=play.game.squad[play.game.careerPlayer]
+            local player=P.FullMatch.careerAthlete(play.game)
             player.name=P.Athlete.name(state.career)
         end
     else
@@ -434,7 +435,8 @@ local function developmentTouch(touch)
                 if saved then
                     for _,play in ipairs({state.careerPlay or false,state.training or false}) do
                         if play then
-                            local player=play.game.squad[play.game.careerPlayer or 1]
+                            local player=play.game.careerPlayer and P.FullMatch.careerAthlete(play.game)
+                                or play.game.squad[1]
                             player.attributes=P.Attributes.restore(state.career.attributes,state.career.position)
                         end
                     end
@@ -572,6 +574,8 @@ local function clubLayout()
     local team = teams[state.clubTeam or 1]
     local net = clubConnection()
     local lobby = net and net.session and net.lobby
+    local saved = P.Clubs.savedRoom(state.clubs)
+    local hosted = P.Clubs.hostedRoom(state.clubs)
     local canRequest = net and net.url and not net.command
         and (not net.inFlight or net.inFlight.operation=="sync")
     local member = lobby and clubMember(lobby,net.session.playerId)
@@ -580,7 +584,10 @@ local function clubLayout()
     if canStart then
         for _, p in ipairs(lobby.players) do canStart = canStart and p.ready and p.connected end
     end
-    local message = state.clubMessage or net and net.error
+    local host = lobby and P.ClubsNet.isHost(net)
+    local interrupted = host and net.interruptedMatchId and net.interruptedMatchId==lobby.matchId
+    local code = state.clubCode or saved and saved.club.code
+    local message = state.clubMessage or net and (net.error or net.notice)
     if not message and net and net.busy and not lobby then message = "Contacting the relay" end
     local roster = lobby and clubOnlineRoster(net,lobby,state.clubView=="ROSTER")
     local schedule
@@ -589,12 +596,15 @@ local function clubLayout()
         for _, fixture in ipairs(P.Clubs.schedule(state.clubs)) do schedule[#schedule+1] = fixture end
     end
     return P.ClubsUI.layout(state.clubView,state.clubs,{
-        editing=state.clubEdit,draft=state.clubDraft,name=state.clubName,code=state.clubCode,
+        editing=state.clubEdit,draft=state.clubDraft,name=state.clubName,code=code,
         relay=state.clubs.settings.relayURL,stageName=P.Career.stages[stage],teamName=team and team.name,
         page=state.clubPage,message=message,lobby=lobby,roster=roster,schedule=schedule,
-        canCreate=not lobby,hostEnabled=canRequest and not lobby and state.clubs.club~=nil,
-        canConnect=canRequest and not lobby and #(state.clubCode or "")==8,
+        canCreate=not lobby,hostEnabled=canRequest and not net.session and state.clubs.club~=nil,
+        canConnect=canRequest and not net.session and #(code or "")==8,
         canReady=canRequest and waiting and member~=nil,ready=member and member.ready,canStart=canStart,
+        savedRoom=saved,hostedRoom=hosted,canReconnect=canRequest and not net.session,
+        host=host,canReopen=canRequest and host and lobby.phase=="final",
+        interrupted=interrupted,canRecover=canRequest and interrupted,confirmRecovery=state.clubConfirmRecover,
         canResume=lobby and lobby.phase=="match" and state.clubPlay~=nil,
         menuMuted=state.menuAssets.muted,hasMenuTheme=state.menuAssets.hasTheme
     })
@@ -604,17 +614,36 @@ local function clubOnlineAction(id)
     local net = clubConnection()
     if not net then return end
     local result, message
-    if id == "HOST_ONLINE" or id == "CONNECT" then
+    if id == "HOST_ONLINE" or id == "CONNECT" or id == "RESUME_ROOM" then
         local player = state.clubs.player
         local appearance = P.Athlete.profile(player)
         local profile = {id=player.id,name=P.Athlete.name(player),position=player.position,
             appearance=appearance,attributes=player.attributes,number=appearance.NUMBER-1}
-        if id == "HOST_ONLINE" then result,message = P.ClubsNet.create(net,state.clubs.club,profile)
-        else result,message = P.ClubsNet.join(net,state.clubCode,profile) end
+        local saved = P.Clubs.savedRoom(state.clubs)
+        local code = state.clubCode or saved and saved.club.code
+        local room = id=="HOST_ONLINE" and P.Clubs.hostedRoom(state.clubs)
+            or id=="CONNECT" and code and P.Clubs.savedRoom(state.clubs,code)
+            or id=="RESUME_ROOM" and saved
+        if room then
+            result,message = P.ClubsNet.resume(net,room.session,profile)
+        elseif id == "HOST_ONLINE" then
+            result,message = P.ClubsNet.create(net,state.clubs.club,profile)
+        else
+            result,message = P.ClubsNet.join(net,code,profile)
+        end
     elseif id == "READY" then
         local member = clubMember(net.lobby,net.session.playerId)
         result,message = P.ClubsNet.ready(net,not member.ready)
     elseif id == "START" then result,message = P.ClubsNet.start(net)
+    elseif id == "REOPEN_ROOM" then result,message = P.ClubsNet.reopen(net)
+    elseif id == "RECOVER_ROOM" then
+        if not state.clubConfirmRecover then
+            state.clubConfirmRecover = true
+            state.clubMessage = "Confirm to end this interrupted match and keep your room"
+            return
+        end
+        state.clubConfirmRecover = nil
+        result,message = P.ClubsNet.reopen(net,true)
     elseif id == "LEAVE" then result,message = P.ClubsNet.leave(net)
     elseif id == "RESUME_MATCH" then
         clearPlayInput()
@@ -660,7 +689,9 @@ local function clubsTouch(touch)
             state.clubMessage="Leave your room before changing relay servers"
             return
         end
-        local value = id=="EDIT_NAME" and state.clubName or id=="EDIT_CODE" and state.clubCode
+        local saved = P.Clubs.savedRoom(state.clubs)
+        local value = id=="EDIT_NAME" and state.clubName
+            or id=="EDIT_CODE" and (state.clubCode or saved and saved.club.code)
             or id=="EDIT_RELAY" and state.clubs.settings.relayURL
         state.clubEdit, state.clubDraft = id, value or ""
         showKeyboard()
@@ -745,11 +776,20 @@ local function updateClubs(dt)
     if not net then return end
     local play, lobby = state.clubPlay, net.lobby
     if not net.session or not lobby then
-        if state.clubs.joined then P.Clubs.joinedTeam(state.clubs,nil) end
+        if net.revokedRoom then
+            local removed,message = P.Clubs.forgetRoom(state.clubs,net.revokedRoom)
+            net.revokedRoom = nil
+            if not removed then state.clubMessage = message end
+        end
         state.clubPlay, state.clubResultID = nil,nil
         if state.page=="CLUB_MATCH" then openClubs("LOBBY") end
         P.ClubsNet.tick(net,dt)
         return
+    end
+    if net.roomSaveChange ~= net.change then
+        net.roomSaveChange = net.change
+        local saved,message = P.Clubs.storeRoom(state.clubs,net.session,lobby)
+        if not saved then state.clubMessage = message end
     end
     if not state.clubs.joined or state.clubs.joined.code~=lobby.code then
         local joined,message = P.Clubs.joinedTeam(state.clubs,lobby)
@@ -758,10 +798,16 @@ local function updateClubs(dt)
             P.ClubsNet.disconnect(net)
             return
         end
-        if state.page=="CLUBS" and state.clubView=="JOIN" then openClubs("LOBBY") end
+    end
+    if state.page=="CLUBS" and state.clubView=="JOIN" then
+        state.clubView, state.clubPage = "LOBBY",1
+    end
+    if play and play.matchId~=lobby.matchId then
+        play,state.clubPlay = nil,nil
+        if state.page=="CLUB_MATCH" then openClubs("LOBBY") end
     end
 
-    if lobby.phase=="match" and (not play or play.matchId~=lobby.matchId) then
+    if lobby.phase=="match" and net.interruptedMatchId~=lobby.matchId and not play then
         play=P.ClubsMatch.new(configuredScene(),lobby,net.session.playerId)
         if not play then
             state.clubMessage="The relay did not assign two playable positions"
@@ -803,14 +849,15 @@ local function updateClubs(dt)
             control.actions=P.ClubsMatch.takeActions(play)
             exchange={input=control}
         end
-    elseif lobby.phase=="final" and lobby.result then
-        if play and not play.isHost then P.ClubsMatch.guestStep(play,dt,net.snapshot) end
-        if state.clubResultID~=lobby.matchId and state.clubCheckedResultChange~=net.change then
-            state.clubCheckedResultChange=net.change
-            local ok,message=P.Clubs.recordOnline(state.clubs,lobby,lobby.result,net.session.playerId)
-            if ok then state.clubResultID=lobby.matchId end
-            state.clubMessage=message
-        end
+    elseif lobby.phase=="final" and play and not play.isHost then
+        P.ClubsMatch.guestStep(play,dt,net.snapshot)
+    end
+    local result = lobby.result or lobby.lastResult
+    if result and state.clubResultID~=result.matchId and net.checkedResultChange~=net.change then
+        net.checkedResultChange=net.change
+        local ok,message=P.Clubs.recordOnline(state.clubs,lobby,result,net.session.playerId)
+        if ok then state.clubResultID=result.matchId end
+        if message then state.clubMessage=message end
     end
     P.ClubsNet.tick(net,dt,exchange)
 end
@@ -1319,9 +1366,10 @@ function touched(touch)
     elseif state.page == "CLUBS" then
         clubsTouch(touch)
     elseif state.page == "ULTIMATE" then
-        local action = P.UltimateUI.touch(state.ultimate,touch)
+        local action,boxScore = P.UltimateUI.touch(state.ultimate,touch)
         if action == "HOME" then openMenu("FRONT")
-        elseif action == "PLAY" then openUltimateMatch() end
+        elseif action == "PLAY" then openUltimateMatch()
+        elseif action == "BOX_SCORE" then openStats(boxScore,"ULTIMATE_RECORD") end
     elseif state.page == "CREATOR" then
         creatorTouch(touch, currentHUDLayout())
     elseif state.page == "CAREER" then
@@ -1351,12 +1399,12 @@ function setup()
     startupError = nil
     runChecked("PolyLax could not start", function()
         assert(type(runSetup) == "function" and type(runFrame) == "function",
-            "Install the complete PolyLax 3.3 Main tab.")
+            "Install the complete PolyLax 3.3.1 Main tab.")
         local modules = PolyLax or {}
         local missing = {}
         for _, name in ipairs({
             "Profile", "TeamUniform", "Character", "AnimationController",
-            "CameraController", "GoalPhysics", "Gameplay", "Field", "Midfield", "MatchAI", "FullMatch",
+            "CameraController", "GoalPhysics", "Gameplay", "Field", "Midfield", "MatchAI", "FullMatch", "SpecialistShift",
             "Defense", "Faceoff", "MatchRules", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
             "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation", "Clubs", "ClubsUI", "ClubsMatch", "ClubsNet", "MenuShowcase", "MenuAssets", "Ultimate", "UltimateUI", "UltimateMatch"
         }) do

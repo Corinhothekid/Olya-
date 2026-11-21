@@ -121,8 +121,10 @@ function Statistics.new(game, options)
         local side = statistics.sides[player.team or 1]
         local id = player.statId or stablePlayerId(side.id, player.slot or i, practice)
         local rosterPlayer = rosters and rosters[player.team or 1][player.slot or i] or player
+        local shift = game.specialistShift
+        if shift and i==shift.slot then rosterPlayer = shift.idle end
         local line = register(statistics,side,id,rosterPlayer)
-        line.number = player.number or line.number
+        if not (shift and i==shift.slot) then line.number = player.number or line.number end
         statistics.entries[i] = {actor=line, team=player.team or 1}
         if i == created and not options.useMatchRoster then
             local personal = register(statistics,side,profileId,player,true)
@@ -152,7 +154,7 @@ local function participant(game, playerIndex)
     local statistics = game.statistics
     local entry = statistics and statistics.entries[playerIndex]
     if not entry then return nil end
-    if entry.profile and not game.careerWaiting then return entry.profile, entry.team end
+    if entry.profile and not game.careerWaiting and not game.careerOnBench then return entry.profile, entry.team end
     return entry.actor, entry.team
 end
 

@@ -73,6 +73,36 @@ local function profileID()
         math.random(0,0x7fffffff), math.random(0,0x7fffffff), math.random(0,0x7fffffff))
 end
 
+local function roomCode(value)
+    if type(value) == "string" then
+        local code = value:upper()
+        if #code == 8 and code:match("^[A-Z0-9]+$") then return code end
+    end
+end
+
+local function assignedClub(lobby)
+    if type(lobby) ~= "table" or not P.Career.stages[lobby.stage] or not teamFor(lobby.stage, lobby.team) then return end
+    local code = roomCode(lobby.code)
+    local name = clean(lobby.name, Clubs.nameLimit)
+    if code and name ~= "" then
+        return {code=code, name=name, stage=lobby.stage, team=lobby.team, season=1}
+    end
+end
+
+local function roomKey(relay, code)
+    return relay and code and relay.."|"..code
+end
+
+local function restoreRoom(record)
+    if type(record) ~= "table" then return end
+    local relay, club = relayURL(record.relayURL), assignedClub(record.club)
+    local session = record.session
+    if not relay or not club or type(session) ~= "table" or roomCode(session.roomCode) ~= club.code
+        or not P.ClubsNet or not P.ClubsNet.validSession(session) then return end
+    return {relayURL=relay, club=club, host=record.host==true,
+        session={roomCode=club.code, token=session.token, playerId=session.playerId}}
+end
+
 local function validID(value)
     return type(value) == "string" and #value == 36 and value:match("^plx_[0-9a-f]+$") ~= nil
 end
@@ -112,7 +142,7 @@ end
 function Clubs.save(data)
     if not saveLocalData or not json or not json.encode then return false end
     local stored = {version=version, player=data.player, club=data.club, settings=data.settings,
-        online=data.online}
+        online=data.online, rooms=data.rooms, activeRooms=data.activeRooms}
     local encoded, raw = pcall(json.encode, stored)
     if not encoded or type(raw) ~= "string" then return false end
     local written, result = pcall(saveLocalData, saveKey, raw)
@@ -129,7 +159,8 @@ function Clubs.load()
         end
     end
 
-    local data = {version=version, player=restorePlayer(saved and saved.player), settings={}}
+    local data = {version=version, player=restorePlayer(saved and saved.player), settings={},
+        rooms={}, activeRooms={}}
     if saved and type(saved.online) == "table" then
         local online = saved.online
         data.online = {games=integer(online.games, 0, 0, 1000000),
@@ -151,6 +182,21 @@ function Clubs.load()
             data.player.stage, data.player.team, data.player.season = stage, team, season
         end
     end
+    if saved and type(saved.rooms) == "table" then
+        for _, value in pairs(saved.rooms) do
+            local room = restoreRoom(value)
+            if room then data.rooms[roomKey(room.relayURL,room.club.code)] = room end
+        end
+    end
+    if saved and type(saved.activeRooms) == "table" then
+        for relay, code in pairs(saved.activeRooms) do
+            if relayURL(relay) and roomCode(code) and data.rooms[roomKey(relay,code)] then
+                data.activeRooms[relay] = code
+            end
+        end
+    end
+    local room = Clubs.savedRoom(data)
+    if room then Clubs.joinedTeam(data,room.club) end
     if not saved or type(saved.player) ~= "table" or not validID(saved.player.id) then Clubs.save(data) end
     return data
 end
@@ -164,6 +210,8 @@ function Clubs.setRelay(data, value)
     candidate.settings.relayURL = url
     if not Clubs.save(candidate) then return false, "Could not save the relay address" end
     data.settings.relayURL = url
+    local room = Clubs.savedRoom(data)
+    Clubs.joinedTeam(data,room and room.club)
     return true
 end
 
@@ -173,7 +221,8 @@ function Clubs.savePlayer(data, player)
     if club and (player.team ~= club.team or player.stage ~= club.stage or player.season ~= club.season) then
         return false
     end
-    local candidate = {player=player, club=club, settings=data.settings, online=data.online}
+    local candidate = {player=player, club=club, settings=data.settings, online=data.online,
+        rooms=data.rooms, activeRooms=data.activeRooms}
     if not Clubs.save(candidate) then return false end
     replace(data.player, player)
     return true
@@ -183,7 +232,8 @@ local function placePlayer(data, club, stage, team)
     local player = copy(data.player)
     local season = club and club.season or player.season
     player.stage, player.team, player.season = stage, team, season
-    local candidate = {player=player, club=club, settings=data.settings, online=data.online}
+    local candidate = {player=player, club=club, settings=data.settings, online=data.online,
+        rooms=data.rooms, activeRooms=data.activeRooms}
     if not Clubs.save(candidate) then return false, "Could not save the club" end
     data.club = club
     replace(data.player, player)
@@ -219,13 +269,58 @@ function Clubs.activeClub(data)
     return data.joined or data.club
 end
 
-local function assignedClub(lobby)
-    if type(lobby) ~= "table" or not P.Career.stages[lobby.stage] or not teamFor(lobby.stage, lobby.team) then return end
-    if type(lobby.code) ~= "string" or not lobby.code:match("^[A-Z0-9]+$") or #lobby.code ~= 8 then return end
-    local name = clean(lobby.name, Clubs.nameLimit)
-    if name ~= "" then
-        return {code=lobby.code, name=name, stage=lobby.stage, team=lobby.team, season=1}
+function Clubs.savedRoom(data, code)
+    local relay = data.settings.relayURL
+    local chosen = code and roomCode(code) or not code and data.activeRooms and data.activeRooms[relay]
+    local key = roomKey(relay,chosen)
+    return key and data.rooms and data.rooms[key] or nil
+end
+
+function Clubs.hostedRoom(data)
+    local relay = data.settings.relayURL
+    for _, room in pairs(data.rooms or {}) do
+        if room.host and room.relayURL == relay then return room end
     end
+end
+
+function Clubs.storeRoom(data, session, lobby)
+    local room = restoreRoom({relayURL=data.settings.relayURL, session=session, club=lobby,
+        host=type(session)=="table" and type(lobby)=="table" and lobby.hostId==session.playerId})
+    if not room then return false, "The relay did not return valid room credentials" end
+    local assigned
+    for _, member in ipairs(lobby.players or {}) do
+        if member.id == session.playerId and type(member.profile) == "table" and member.profile.id == data.player.id then
+            assigned = member
+            break
+        end
+    end
+    if not assigned then return false, "This Clubs room is assigned to another athlete" end
+    local previous = Clubs.savedRoom(data,room.club.code)
+    local active = data.activeRooms and data.activeRooms[room.relayURL]
+    if previous and previous.session.token == session.token and previous.session.playerId == session.playerId
+        and previous.host == room.host and previous.club.name == room.club.name
+        and previous.club.team == room.club.team and previous.club.stage == room.club.stage
+        and active == room.club.code then return true end
+
+    local candidate = copy(data)
+    candidate.rooms, candidate.activeRooms = candidate.rooms or {}, candidate.activeRooms or {}
+    candidate.rooms[roomKey(room.relayURL,room.club.code)] = room
+    candidate.activeRooms[room.relayURL] = room.club.code
+    if not Clubs.save(candidate) then return false, "Could not save this club's room credentials" end
+    data.rooms, data.activeRooms = candidate.rooms,candidate.activeRooms
+    return true
+end
+
+function Clubs.forgetRoom(data, code)
+    local room = Clubs.savedRoom(data,code)
+    if not room then return true end
+    local candidate = copy(data)
+    candidate.rooms[roomKey(room.relayURL,room.club.code)] = nil
+    if candidate.activeRooms[room.relayURL] == room.club.code then candidate.activeRooms[room.relayURL] = nil end
+    if not Clubs.save(candidate) then return false,"Could not remove the expired room session" end
+    data.rooms, data.activeRooms = candidate.rooms,candidate.activeRooms
+    if data.joined and data.joined.code==room.club.code then Clubs.joinedTeam(data,nil) end
+    return true
 end
 
 function Clubs.joinedTeam(data, lobby)
@@ -236,7 +331,7 @@ function Clubs.joinedTeam(data, lobby)
     if localClub and localClub.stage == remote.stage and localClub.team == remote.team then
         remote.season = localClub.season
     end
-    -- Room membership is session-only. Keep the saved club and athlete intact.
+    -- Joining changes the displayed club. Keep the saved club and athlete intact.
     data.joined = remote
     return true
 end
@@ -282,11 +377,12 @@ end
 -- result is acknowledged without changing the player, wallet, or record.
 function Clubs.recordOnline(data, lobby, result, memberId)
     local remote = assignedClub(lobby)
-    if not remote or lobby.phase ~= "final" or type(result) ~= "table" then
+    if not remote or type(result) ~= "table" then
         return false, "No completed Clubs match"
     end
     local id = result.matchId
-    if id ~= lobby.matchId or type(id) ~= "string" or #id > 72 or not id:match("^[A-Za-z0-9_%-]+$") then
+    local final = lobby.phase=="final" and id==lobby.matchId or result==lobby.lastResult
+    if not final or type(id) ~= "string" or #id > 72 or not id:match("^[A-Za-z0-9_%-]+$") then
         return false, "The result does not match this room"
     end
     local player = data.player

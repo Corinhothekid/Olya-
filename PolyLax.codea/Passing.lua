@@ -78,6 +78,7 @@ local function catchOffset(receiver, source, x, z)
     dx, dz = dx/range, dz/range
     local scale = receiver.rig.proportions.scale
     local extension = receiver.rig.stickReachExtension or 0
+    if receiver.rig.stickType=="goalie" then extension = receiver.rig.pocket.position.y-.70 end
     -- The catch pose's tilted shaft places the long pocket farther to the right and higher.
     local forward, lateral = .67 + .22*extension, .82 + .70*extension
     return vec3((forward*dx-lateral*dz)*scale.x, (2.23+.714*extension)*scale.y,

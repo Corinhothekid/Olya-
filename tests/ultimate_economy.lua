@@ -130,12 +130,19 @@ assert(collection.wins == 1 and collection.draws == 1 and collection.losses == 1
 -- A compile-time private build unlocks its own independent one-time developer grant.
 U.devMode = true
 assert(not E.canGrantTestGold(collection) and not E.grantTestGold(collection))
+assert(not E.resetTestProgress(collection) and collection.coins == 850)
 U,E = loadUltimate(true)
 local dev = U.load()
 assert(dev.coins == 0 and E.canGrantTestGold(dev))
 assert(E.grantTestGold(dev) and dev.coins == 1000000)
 assert(not E.grantTestGold(dev) and not E.canGrantTestGold(dev))
 assert(not E.canGrantTestGold(U.load()))
+assert(E.grantStarter(dev))
+failSave = true
+assert(not E.resetTestProgress(dev) and dev.coins==1000000 and #U.ownedCards(dev)==5)
+failSave = false
+assert(E.resetTestProgress(dev) and dev.coins==0 and #U.ownedCards(dev)==0 and not dev.starterGranted)
+assert(U.load().testGoldGranted and not E.grantTestGold(U.load()))
 U,E = loadUltimate(false)
 assert(U.load().coins == 850 and not E.grantTestGold(U.load()))
 

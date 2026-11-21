@@ -41,7 +41,7 @@ assert(specialist.role=="SSDM" and specialist.stickType=="short")
 assert(poleCount(shortCareer,1)==3 and poleCount(shortCareer,2)==3)
 local capped = Match.new(craft.scene(),profile,1,2,{profile="ncaa",maxLongPoles=2})
 assert(poleCount(capped,1)==2 and poleCount(capped,2)==2)
-assert(capped.squad[10].stickType=="short" and capped.squad[20].stickType=="short")
+assert(capped.squad[10].stickType=="goalie" and capped.squad[20].stickType=="goalie")
 
 local function stick(base, tip, length)
     return {stickType=length>0 and "long" or "short",stickReachExtension=length,

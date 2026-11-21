@@ -295,7 +295,8 @@ end
 function UI.action(game, item)
     if not item then return nil end
     local id = item.id
-    if game.careerWaiting or id == "switch" and game.careerPlayer then return nil end
+    if game.careerWaiting or game.careerOnBench or game.specialistShift and game.specialistShift.going
+        or id == "switch" and game.careerPlayer then return nil end
     if game.clubsPlayer and (id=="switch" or item.tactical) then return nil end
     if game.phase == "FACEOFF" then
         local draw = game.faceoff
@@ -309,6 +310,8 @@ function UI.action(game, item)
     if id == "pass" and game.loose then return "scoop" end
     local holder = holderOf(game)
     if game.homeScore ~= nil and holder and holder.team == 2 then
+        local athlete = game.squad[game.controlled]
+        if athlete and athlete.role=="G" and id~="switch" then return nil end
         return (PolyLax.Defense and defenseActions or legacyDefense)[id]
     end
     if item.tactical and (not holder or game.pending or game.flight) then return nil end
@@ -706,7 +709,10 @@ function UI.practice(layout, game, moveX, moveZ, aim, cameraLabel, ballEdge, pas
         finalScore(game,layout)
     else
         drawFaceoff(layout,game)
-        local message = game.clubsStatus or game.careerWaiting and game.phase == "LIVE" and "FIRST SHIFT SOON"
+        local message = game.clubsStatus
+            or game.specialistShift and game.specialistShift.going and "SIDELINE EXCHANGE"
+            or game.careerOnBench and game.phase=="LIVE" and "ON THE BENCH"
+            or game.careerWaiting and game.phase == "LIVE" and "FIRST SHIFT SOON"
             or game.announcementTime > 0 and game.announcement
             or game.clock <= 0 and game.homeScore == nil and "PRACTICE COMPLETE"
         if message and message ~= "" and message ~= positionMessage then

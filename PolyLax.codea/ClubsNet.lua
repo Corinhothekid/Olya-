@@ -30,7 +30,7 @@ function Net.validURL(value, allowLoopback)
     return url
 end
 
-local function validSession(session)
+function Net.validSession(session)
     return type(session) == "table" and type(session.token) == "string"
         and #session.token >= 16 and #session.token <= 256 and session.token:match("^[%w_%-]+$")
         and type(session.playerId) == "string" and #session.playerId > 0
@@ -65,6 +65,8 @@ end
 
 local function clearSession(connection)
     connection.session, connection.lobby, connection.command = nil, nil, nil
+    connection.restoring, connection.interruptedMatchId, connection.resumeRequest = nil, nil, nil
+    connection.notice = nil
     resetMatch(connection)
 end
 
@@ -81,7 +83,12 @@ local function updateReply(connection, operation, reply, sent)
         and type(lobby.code) == "string" and type(lobby.phase) == "string" then
         if lobby.matchId ~= (connection.lobby and connection.lobby.matchId) then resetMatch(connection) end
         connection.lobby = lobby
-        if validSession(reply.session) then connection.session = reply.session end
+        if Net.validSession(reply.session) then connection.session = reply.session end
+        if connection.interruptedMatchId ~= lobby.matchId then connection.interruptedMatchId = nil end
+        if connection.restoring and lobby.phase=="match" and Net.isHost(connection) then
+            connection.interruptedMatchId = lobby.matchId
+        end
+        connection.restoring = nil
     else
         return false
     end
@@ -90,7 +97,8 @@ local function updateReply(connection, operation, reply, sent)
         connection.inputSeq = math.max(connection.inputSeq, reply.inputSeq)
     end
     local snapshot = reply.snapshot
-    if type(snapshot) == "table" and type(snapshot.seq) == "number"
+    if type(snapshot) == "table" and type(snapshot.seq) == "number" and connection.lobby
+        and (not snapshot.matchId or snapshot.matchId == connection.lobby.matchId)
         and (not connection.snapshot or snapshot.seq > connection.snapshot.seq) then
         connection.snapshot = snapshot
     end
@@ -148,12 +156,16 @@ local function request(connection, operation, payload)
         end
         connection.inFlight, connection.busy = nil, false
         if status < 200 or status >= 300 then
-            if status == 401 then clearSession(connection) end
+            if operation == "resume" then connection.resumeRequest = nil end
+            if status == 401 and connection.session then
+                connection.revokedRoom = connection.session.roomCode
+                clearSession(connection)
+            end
             if operation == "sync" then
                 connection.pendingInput = nil
                 -- A playing client may still have input in flight when the
                 -- host finishes. Fetch the new phase without stale match data.
-                connection.refreshLobby = status == 409 and payload.input ~= nil
+                connection.refreshLobby = status == 409 and (payload.input ~= nil or payload.snapshot ~= nil)
             end
             local message = type(reply.message) == "string" and reply.message
                 or type(reply.error) == "string" and reply.error or "The relay declined this request."
@@ -166,6 +178,10 @@ local function request(connection, operation, payload)
             connection.nextPoll = connection.clock + lobbyPoll
         else
             connection.error, connection.retry = nil, 0
+            if operation == "resume" then connection.resumeRequest = nil end
+            if type(reply.profileError) == "string" then
+                connection.notice = reply.profileError:gsub("%c"," "):sub(1,140)
+            end
             connection.status = connection.lobby and "connected" or "idle"
             local interval = connection.lobby and connection.lobby.phase == "match" and matchPoll or lobbyPoll
             connection.nextPoll = connection.clock + interval
@@ -184,7 +200,7 @@ end
 
 local function command(connection, operation, payload, authenticated)
     if not connection.url then return false, connection.error end
-    if authenticated and not validSession(connection.session) then return false, "Join a room first." end
+    if authenticated and not Net.validSession(connection.session) then return false, "Join a room first." end
     if connection.command then return false, "Wait for the current request." end
     if connection.inFlight then
         if connection.inFlight.operation ~= "sync" then return false, "Wait for the current request." end
@@ -208,21 +224,35 @@ function Net.join(connection, roomCode, profile)
     return command(connection, "join", {roomCode=code, profile=profile})
 end
 
-function Net.resume(connection, session)
+function Net.resume(connection, session, profile)
     if not connection.url then return false, connection.error end
-    if not validSession(session) then return false, "No saved Clubs room." end
+    if not Net.validSession(session) then return false, "No saved Clubs room." end
     if connection.inFlight or connection.command then return false, "Wait for the current request." end
+    if connection.session and connection.session.token ~= session.token then return false, "Disconnect from your current room first." end
     if not connection.session or session.token ~= connection.session.token then clearSession(connection) end
     connection.session = {token=session.token, playerId=session.playerId, roomCode=session.roomCode}
-    return command(connection, "resume", {}, true)
+    connection.restoring = not connection.lobby
+    connection.notice = nil
+    connection.resumeRequest = {profile=profile}
+    return command(connection, "resume", connection.resumeRequest, true)
 end
 
 function Net.ready(connection, ready)
-    return command(connection, "ready", {ready=ready == true}, true)
+    return command(connection, "ready", {ready=ready == true,
+        revision=connection.lobby and connection.lobby.revision}, true)
 end
 
 function Net.start(connection)
-    return command(connection, "start", {}, true)
+    return command(connection, "start", {revision=connection.lobby and connection.lobby.revision}, true)
+end
+
+function Net.reopen(connection, abandon)
+    if not Net.isHost(connection) then return false, "Only the host can reopen the lobby." end
+    local lobby = connection.lobby
+    if not lobby.matchId or lobby.phase ~= (abandon and "match" or "final") then
+        return false, "This lobby cannot be reopened right now."
+    end
+    return command(connection, "reopen", {matchId=lobby.matchId,abandon=abandon==true}, true)
 end
 
 function Net.leave(connection)
@@ -299,13 +329,18 @@ function Net.tick(connection, dt, exchange)
         connection.command = nil
         if connection.session then request(connection, pending.operation, pending.payload) end
     elseif connection.session and connection.clock >= connection.nextPoll then
+        if connection.resumeRequest then
+            request(connection,"resume",connection.resumeRequest)
+            return
+        end
         local payload = {}
         if Net.isHost(connection) then
             payload.after = connection.after
-            if playing then payload.snapshot = exchange.snapshot end
+            if playing and not connection.refreshLobby then payload.snapshot = exchange.snapshot end
         elseif playing and not connection.refreshLobby then
             payload.input = buildInput(connection)
         end
+        if payload.input or payload.snapshot then payload.matchId = connection.lobby.matchId end
         connection.refreshLobby = nil
         request(connection, "sync", payload)
     end

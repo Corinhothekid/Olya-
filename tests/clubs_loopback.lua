@@ -167,7 +167,24 @@ end
 function background(...)
     assert(select('#',...)<3,"Unexpected Codea draw failure")
 end
-json=options.json
+local encodedSaves = {}
+local function clone(value)
+    if type(value)~="table" then return value end
+    local result = {}
+    for key, child in pairs(value) do result[key]=clone(child) end
+    return result
+end
+json={
+    encode=function(value)
+        local raw = options.json.encode(value)
+        encodedSaves[raw] = clone(value)
+        return raw
+    end,
+    decode=function(raw)
+        if encodedSaves[raw] then return clone(encodedSaves[raw]) end
+        return options.json.decode(raw)
+    end
+}
 http={request=function(url,success,fail,params)
     local path=assert(url:match("(/v1/%a+)$"))
     return request(endpoint..path,success,fail,params)
@@ -216,4 +233,59 @@ assert(Net.resume(testGuest,testGuest.session) and testGuest.lobby.phase=="final
 assert(testGuest.lobby.result.matchId==currentMatch.matchId)
 for _=1,60 do draw() end
 assert(app.clubs.player.games==1,"The app awarded the same result twice")
-print("Clubs Main passed host controls, joining the match, changing views, publishing the final and saving it once.")
+local code = hostConnection.lobby.code
+local durable = assert(P.Clubs.savedRoom(P.Clubs.load()))
+assert(durable.session.roomCode==code and durable.session.token==hostConnection.session.token)
+tap(app.layout.pause)
+clubTap("REOPEN_ROOM")
+assert(app.page=="CLUBS" and app.clubView=="LOBBY" and not app.clubPlay)
+assert(hostConnection.lobby.code==code and hostConnection.lobby.phase=="lobby")
+assert(hostConnection.lobby.lastResult.matchId==currentMatch.matchId and not hostConnection.lobby.matchId)
+local function restartHost()
+    setup(); draw()
+    app=assert(upvalue(upvalue(draw,"runFrame"),"state"))
+    tap(P.Style.screenLayout("FRONT").byId.CLUBS)
+    assert(P.Clubs.savedRoom(app.clubs).session.roomCode==code)
+    clubTap("LOBBY"); clubTap("RESUME_ROOM")
+    hostConnection=assert(app.clubsNet)
+    assert(hostConnection.lobby.code==code and Net.isHost(hostConnection))
+end
+restartHost()
+assert(hostConnection.lobby.phase=="lobby" and app.clubs.player.games==1)
+assert(Net.resume(testGuest,testGuest.session,{id="friend",name="Friend",position=6,number=8}))
+assert(testGuest.lobby.phase=="lobby" and testGuest.lobby.code==code)
+local updatedProfile
+for _, member in ipairs(testGuest.lobby.players) do
+    if member.id==testGuest.session.playerId then updatedProfile=member.profile end
+end
+assert(updatedProfile.position==6)
+assert(Net.ready(testGuest,true))
+clubTap("READY")
+for _=1,60 do draw() end
+clubTap("START")
+local second = assert(app.clubPlay)
+assert(second.matchId~=currentMatch.matchId and app.page=="CLUB_MATCH")
+second.game.phase,second.game.period,second.game.clock="LIVE",2,.01
+for _=1,75 do draw() end
+assert(hostConnection.lobby.phase=="final" and app.clubs.player.games==2)
+tap(app.layout.pause); clubTap("REOPEN_ROOM")
+assert(Net.resume(testGuest,testGuest.session))
+assert(testGuest.lobby.phase=="lobby" and testGuest.lobby.lastResult.matchId==second.matchId)
+assert(Net.ready(testGuest,true))
+clubTap("READY")
+for _=1,60 do draw() end
+clubTap("START")
+local interrupted = assert(app.clubPlay)
+restartHost()
+assert(hostConnection.interruptedMatchId==interrupted.matchId and not app.clubPlay)
+assert(not clubLayout().byId.RESUME_MATCH and clubLayout().byId.RECOVER_ROOM)
+clubTap("RECOVER_ROOM")
+assert(hostConnection.lobby.phase=="match")
+clubTap("RECOVER_ROOM")
+assert(hostConnection.lobby.phase=="lobby" and hostConnection.lobby.code==code)
+assert(hostConnection.lobby.lastResult.matchId==second.matchId and app.clubs.player.games==2)
+clubTap("LEAVE")
+assert(not hostConnection.session and P.Clubs.savedRoom(app.clubs).session.roomCode==code)
+clubTap("RESUME_ROOM")
+assert(Net.isHost(hostConnection) and hostConnection.lobby.code==code)
+print("Clubs Main passed scores, two awarded matches, reconnect, permanent room reuse, and interrupted match recovery.")
