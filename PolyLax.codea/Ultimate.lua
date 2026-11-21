@@ -4,7 +4,7 @@ PolyLax = PolyLax or {}
 local Ultimate = {}
 PolyLax.Ultimate = Ultimate
 
-Ultimate.version = 1
+Ultimate.version = 2
 Ultimate.sources = {
     pll = "https://stats.premierlacrosseleague.com/player-table",
     nll = "https://www.nll.com/stats/",
@@ -29,6 +29,91 @@ Ultimate.players = {
     {id="pll_king_2026",name="Sam King",league="PLL",season=2026,team="Archers",position="M",stats={games=12,points=33,goals=23,assists=10}},
     {id="pll_malone_2026",name="TJ Malone",league="PLL",season=2026,team="Whipsnakes",position="A",stats={games=12,points=32,goals=24,assists=8}}
 }
+-- Research candidates, NOT verified season roster entries. No current affiliation implied.
+Ultimate.researchCandidates = {
+    {id="research_pll_1",name="Jeff Teat",league="PLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_pll_2",name="Lyle Thompson",league="PLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_pll_3",name="Asher Nolting",league="PLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_pll_4",name="Connor Fields",league="PLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_pll_5",name="Matt Rambo",league="PLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_pll_6",name="Grant Ament",league="PLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_pll_7",name="Zed Williams",league="PLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_pll_8",name="Rob Pannell",league="PLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_pll_9",name="Tom Schreiber",league="PLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_pll_10",name="Romar Dennis",league="PLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_pll_11",name="Ryan Conrad",league="PLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_pll_12",name="Dox Aitken",league="PLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_pll_13",name="Trevor Baptiste",league="PLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_pll_14",name="TD Ierlan",league="PLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_pll_15",name="Mike Sisselberger",league="PLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_pll_16",name="JT Giles-Harris",league="PLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_pll_17",name="Gavin Adler",league="PLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_pll_18",name="Matt Dunn",league="PLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_pll_19",name="Jack Rowlett",league="PLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_pll_20",name="Michael Ehrhardt",league="PLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_pll_21",name="Graeme Hossack",league="PLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_pll_22",name="Blaze Riorden",league="PLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_pll_23",name="Jack Kelly",league="PLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_pll_24",name="Colin Kirst",league="PLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_pll_25",name="Brett Dobson",league="PLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_mll_26",name="Paul Rabil",league="MLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_mll_27",name="John Grant Jr.",league="MLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_mll_28",name="Casey Powell",league="MLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_mll_29",name="Ryan Powell",league="MLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_mll_30",name="Mikey Powell",league="MLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_mll_31",name="John Tavares",league="MLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_mll_32",name="Matt Poskay",league="MLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_mll_33",name="Kevin Leveille",league="MLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_mll_34",name="Brendan Mundorf",league="MLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_mll_35",name="Steele Stanwick",league="MLL",position="A",verification="pending",team=nil,season=nil},
+    {id="research_mll_36",name="Kyle Harrison",league="MLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_mll_37",name="Matt Striebel",league="MLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_mll_38",name="Max Seibald",league="MLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_mll_39",name="Paul Gait",league="MLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_mll_40",name="Gary Gait",league="MLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_mll_41",name="Joe Walters",league="MLL",position="M",verification="pending",team=nil,season=nil},
+    {id="research_mll_42",name="Brodie Merrill",league="MLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_mll_43",name="Nicky Polanco",league="MLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_mll_44",name="Kyle Hartzell",league="MLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_mll_45",name="Lee Zink",league="MLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_mll_46",name="Jesse Schwartzman",league="MLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_mll_47",name="Drew Adams",league="MLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_mll_48",name="Brian Dougherty",league="MLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_nll_49",name="Dhane Smith",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_50",name="Josh Byrne",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_51",name="Chris Cloutier",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_52",name="Ryan Smith",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_53",name="Shayne Jackson",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_54",name="Randy Staats",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_55",name="Austin Staats",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_56",name="Curtis Dickson",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_57",name="Cody Jamieson",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_58",name="Mark Matthews",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_59",name="Callum Crawford",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_60",name="Rob Hellyer",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_61",name="Tom Schreiber",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_62",name="Lyle Thompson",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_63",name="Jeff Teat",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_64",name="John Tavares",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_65",name="Dan Dawson",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_66",name="Shawn Evans",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_67",name="Colin Doyle",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_68",name="John Grant Jr.",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_69",name="Gary Gait",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_70",name="Paul Gait",league="NLL",position="F",verification="pending",team=nil,season=nil},
+    {id="research_nll_71",name="Zach Currier",league="NLL",position="T",verification="pending",team=nil,season=nil},
+    {id="research_nll_72",name="Tyler Pace",league="NLL",position="T",verification="pending",team=nil,season=nil},
+    {id="research_nll_73",name="Graeme Hossack",league="NLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_nll_74",name="Brodie Merrill",league="NLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_nll_75",name="Steve Priolo",league="NLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_nll_76",name="Matt Beers",league="NLL",position="D",verification="pending",team=nil,season=nil},
+    {id="research_nll_77",name="Matt Vinc",league="NLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_nll_78",name="Christian Del Bianco",league="NLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_nll_79",name="Dillon Ward",league="NLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_nll_80",name="Nick Rose",league="NLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_nll_81",name="Doug Jamieson",league="NLL",position="G",verification="pending",team=nil,season=nil},
+    {id="research_nll_82",name="Mike Poulin",league="NLL",position="G",verification="pending",team=nil,season=nil},
+}
 -- League/club metadata for kit previews; colors are ORIGINAL game design, not replicas.
 Ultimate.kits = {
     {id="field_violet",name="Violet Field",league="PLL",era="modern",home={34,30,73},away={228,222,241},accent={202,158,64}},
@@ -38,9 +123,10 @@ Ultimate.kits = {
     {id="box_midnight",name="Midnight Box",league="NLL",era="indoor",home={27,28,37},away={222,223,231},accent={221,114,47}},
     {id="box_ice",name="Ice Box",league="NLL",era="indoor",home={23,67,113},away={225,241,250},accent={97,188,226}}
 }
-function Ultimate.catalog(league)
+function Ultimate.catalog(league, includeResearch)
+    local source=includeResearch and Ultimate.researchCandidates or Ultimate.players
     local out={}
-    for _,p in ipairs(Ultimate.players) do
+    for _,p in ipairs(source) do
         if not league or p.league==league then out[#out+1]=p end
     end
     return out
@@ -52,7 +138,7 @@ function Ultimate.kit(id)
     for _,k in ipairs(Ultimate.kits) do if k.id==id then return k end end
 end
 function Ultimate.defaultCollection()
-    return {version=1,owned={},squad={},equippedKit="field_violet",coins=0}
+    return {version=2,owned={},squad={},equippedKit="field_violet",coins=0,unopenedPacks=0,completedSBC={}}
 end
 function Ultimate.addCard(collection,id)
     if not Ultimate.find(id) then return false,"unknown player" end
