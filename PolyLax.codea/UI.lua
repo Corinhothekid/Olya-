@@ -226,14 +226,14 @@ function UI.practiceLayout(showPositioning)
     local left, right = safe.left+12, WIDTH-safe.right-12
     local width, header = right-left, HEIGHT-safe.top
     local footer = math.max(12,safe.bottom+6)
-    local tacticalHeight = 36
+    local tacticalHeight = 40
     local controlBase = footer+tacticalHeight+8
-    local diameter = math.min(63,width*.205)
+    local diameter = math.min(69,width*.21)
     local bX = right-diameter*.5-2
     local aX = bX-diameter-6
     local joyMaxX = left+math.min(width*.31,104)
     local joyX = (left+joyMaxX)*.5
-    local joyRadius = math.min(39,(joyMaxX-left)*.44)
+    local joyRadius = math.min(43,(joyMaxX-left)*.44)
     local joyY = controlBase+joyRadius+1
     local auxRight = aX-diameter*.5-5
     local auxX = (joyMaxX+auxRight)*.5
@@ -364,12 +364,12 @@ local function chip(layout, item, name, symbol, emphatic)
     end
 end
 
-local primaryBlue = color(27,92,204,248)
-local primaryBlueLight = color(58,132,242,244)
-local primaryBlueDark = color(30,53,87,227)
-local primaryRed = color(184,45,64,248)
-local primaryRedLight = color(223,71,93,244)
-local primaryRedDark = color(82,39,52,227)
+local primaryBlue = color(22,130,65,248)
+local primaryBlueLight = color(43,177,92,244)
+local primaryBlueDark = color(23,66,42,227)
+local primaryRed = color(181,49,49,248)
+local primaryRedLight = color(231,76,76,244)
+local primaryRedDark = color(81,37,37,227)
 local primaryRim = color(155,181,207,195)
 local controlShadow = color(5,9,14,208)
 local graphite = color(34,42,52,241)
@@ -388,6 +388,14 @@ local function compactAction(layout, item, action, textValue, active)
         icon(symbol,item.x-item.w*.5+11,item.y,.63,active and navy or muted)
     end
     label(textValue,item.x+(hasSymbol and 5 or 0),item.y,item.w < 51 and 9 or 10,textTint)
+    if item.id == "dodge" or item.id == "setpick" then
+        local key = item.id == "dodge" and "X" or "Y"
+        local tint = item.id == "dodge" and color(38,120,205) or color(218,168,37)
+        ellipseMode(CENTER)
+        fill(tint)
+        ellipse(item.x-item.w*.5+9,item.y+item.h*.5-3,16)
+        label(key,item.x-item.w*.5+9,item.y+item.h*.5-3,9,white)
+    end
 end
 
 local function primaryAction(layout, item, action, textValue, active)
@@ -406,8 +414,8 @@ local function primaryAction(layout, item, action, textValue, active)
     ellipse(item.x,item.y,span-2)
     fill(face)
     ellipse(item.x,item.y+2,span-7)
-    label(item.primary,item.x,item.y+7,23,action and white or muted)
-    label(textValue,item.x,item.y-13,item.w < 51 and 8 or 9,action and white or muted)
+    label(item.primary,item.x,item.y+7,25,action and white or muted)
+    label(textValue,item.x,item.y-14,item.w < 51 and 8 or 10,action and white or muted)
 end
 
 local function drawAim(guide)
