@@ -15,7 +15,7 @@ Ultimate.disclaimer = Catalog.disclaimer
 Ultimate.slotRoles = {"A","A","A","M","M","M","D","D","D","G"}
 
 -- Only enable in a private source build. It uses a separate save from public builds.
-local developerBuild = false
+local developerBuild = true -- LOCAL TEST BUILD ONLY: switch back to false before release
 local storageKey = "PolyLax.Ultimate.Collection.3" .. (developerBuild and ".Dev" or "")
 local legacyKeys = {"PolyLax.Ultimate.Collection.2", "PolyLax.Ultimate.Collection"}
 local maxHistory = 20
