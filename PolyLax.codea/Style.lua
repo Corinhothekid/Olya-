@@ -63,6 +63,7 @@ end
 
 local choices = {
     FRONT = {
+        {id="ROAD", title="Road to Glory", detail="Explore campus and play Brothers in Arms", prominent=true},
         {id="MODES", title="Quick Play", detail="Practice or play a full match", prominent=true},
         {id="CAREER", title="Be a Pro", detail="Develop your single-player career"},
         {id="ULTIMATE", title="Ultimate Team", detail="Build a squad and compete", icon="ultimate"},
@@ -104,9 +105,9 @@ function Style.screenLayout(page, options)
         touches={},motion={}
     }
     local front = page == "FRONT"
-    local row = pause and math.min(53,room*.115) or front and math.min(70,room*.114)
+    local row = pause and math.min(53,room*.115) or front and math.min(66,room*.102)
         or math.min(76,room*.142)
-    local gap = pause and 9 or front and math.min(10,room*.018) or 12
+    local gap = pause and 9 or front and math.min(9,room*.016) or 12
     local stack = #list*row + (#list-1)*gap
     local firstTop
     if pause then
@@ -126,9 +127,11 @@ function Style.screenLayout(page, options)
     for index, choice in ipairs(list) do
         local enabled = choice.id ~= "STATS" or options and options.statsEnabled == true
         if choice.id == "RESET" and options and options.resetEnabled == false then enabled=false end
+        if choice.id == "CREATOR" and options and options.roadPause then enabled=false end
         local y = firstTop-row*.5-(index-1)*(row+gap)
         local item = hitbox(choice.id,x,y,w,row,choice,enabled == true)
         if choice.id == "HOME" and options and options.ultimatePause then item.label="Ultimate Team" end
+        if choice.id == "HOME" and options and options.roadPause then item.label="Return to Campus" end
         dashboard.buttons[index],dashboard.byId[item.id] = item,item
     end
     return dashboard
@@ -256,7 +259,7 @@ function Style.screen(page, l, elapsed, showcase, menuAssets)
         local hasLogo = menuAssets and PolyLax.MenuAssets.drawLogo(menuAssets,l.x,l.titleY,l.w*.94,logoHeight)
         local tempo = .5+.5*math.sin((elapsed or 0)*1.6)
         if not hasLogo then
-            local title = page == "FRONT" and "POLYLAX 3.3.1" or "Play Modes"
+            local title = page == "FRONT" and "POLYLAX 3.4" or "Play Modes"
             local size = page == "FRONT" and math.min(48,l.w*.164) or 30
             font("AvenirNext-HeavyItalic")
             if showcase then label(title,l.x+1,l.titleY+7,size,palette.deep,false,l.w) end

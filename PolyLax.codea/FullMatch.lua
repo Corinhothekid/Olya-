@@ -302,7 +302,7 @@ function Match.new(scene, profile, homeId, awayId, rules)
             local rig = P.Character.new(scene)
             local human = match.humans and match.humans[index]
             local custom = human or not lineup and not match.humans and index==(match.careerPlayer or userPlayer)
-            local selected = lineup and lineup[slot]
+            local selected = lineup and lineup[slot] or rules.teammates and team==1 and rules.teammates[slot]
             local appearance = human and human.appearance or custom and profile or playerProfile(team,slot)
             local member = selected or roster and roster[slot]
             local role = spec[1]

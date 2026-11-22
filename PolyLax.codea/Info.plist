@@ -51,6 +51,14 @@
 		<string>UltimateSBCUI</string>
 		<string>UltimateUI</string>
 		<string>UltimateMatch</string>
+		<string>StoryChapters</string>
+		<string>RoadEquipment</string>
+		<string>Story</string>
+		<string>RoadEquipmentUI</string>
+		<string>FreeRoamWorld</string>
+		<string>FreeRoamUI</string>
+		<string>FreeRoam</string>
+		<string>RoadToGlory</string>
 	</array>
 </dict>
 </plist>

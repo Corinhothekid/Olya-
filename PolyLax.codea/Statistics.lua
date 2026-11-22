@@ -120,7 +120,7 @@ function Statistics.new(game, options)
     for i, player in ipairs(game.squad) do
         local side = statistics.sides[player.team or 1]
         local id = player.statId or stablePlayerId(side.id, player.slot or i, practice)
-        local rosterPlayer = rosters and rosters[player.team or 1][player.slot or i] or player
+        local rosterPlayer = not player.statId and rosters and rosters[player.team or 1][player.slot or i] or player
         local shift = game.specialistShift
         if shift and i==shift.slot then rosterPlayer = shift.idle end
         local line = register(statistics,side,id,rosterPlayer)
@@ -411,7 +411,8 @@ function Statistics.finalize(game, options)
         data.summary = snapshot(game,options,true)
         game.statSummary = data.summary
     end
-    if not data.saved and not (options and options.persist == false) then
+    if not data.saved and not (options and options.persist == false)
+        and not (game.statisticsOptions and game.statisticsOptions.persist == false) then
         data.saved = Statistics.saveSummary(data.summary)
     end
     return data.summary

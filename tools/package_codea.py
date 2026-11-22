@@ -20,6 +20,10 @@ def read_project(project):
     sources = {tab: (project / f"{tab}.lua").read_bytes() for tab in tabs}
     if any(not source.strip() for source in sources.values()):
         raise ValueError("The project contains an empty Lua tab")
+    if "Ultimate" in sources:
+        flags = re.findall(rb"^\s*local developerBuild\s*=\s*([^\r\n]+)", sources["Ultimate"], re.MULTILINE)
+        if len(flags) != 1 or flags[0].split(b"--", 1)[0].strip() != b"false":
+            raise ValueError("Public packages require local developerBuild = false in Ultimate.lua")
     return plist, sources
 
 

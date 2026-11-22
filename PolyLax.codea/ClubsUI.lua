@@ -156,7 +156,8 @@ end
 function screens.SETTINGS(layout, data, options)
     local relay=relayURL(data,options)
     stack(layout,{
-        item("CREATOR","Player Creator","Customize the Quick Play athlete"),
+        item("CREATOR","Player Creator",options.campusReturn and "Customize your Road to Glory athlete"
+            or "Customize the Quick Play athlete"),
         item("EDIT_RELAY","Clubs relay server",field(options,"EDIT_RELAY",relay,"Set the online server address")),
         item("MENU_MUSIC",options.menuMuted and "Menu Music Off" or "Menu Music On",
             options.hasMenuTheme and "Tap to change" or "Main_Menu_Melody unavailable")
@@ -241,7 +242,11 @@ function ClubsUI.layout(view, data, options)
     local top,bottom=HEIGHT-safe.top-12,safe.bottom+12
     local layout={view=view,title=heading[view],top=top,bottom=bottom,x=x,w=width,
         cursor=top-58,floor=bottom+26,rows={},buttons={},byId={},message=options.message}
-    local back=place(layout,item("BACK","Back"),x-width*.5+30,top-21,60,36)
+    local campus=options.campusReturn and (view=="CLUBS" or view=="SETTINGS")
+    local backWidth=campus and 142 or 60
+    layout.titleInset=backWidth+16
+    local back=place(layout,item("BACK",campus and "Return to Campus" or "Back"),
+        x-width*.5+backWidth*.5,top-21,backWidth,36)
     back.compact=true
     screens[view](layout,data,options)
     return layout
@@ -302,7 +307,7 @@ function ClubsUI.draw(layout)
     textMode(CENTER)
     textAlign(CENTER)
     font("AvenirNext-DemiBold")
-    textAt(layout.title,layout.x-layout.w*.5+76,layout.top-21,23,p.white,layout.w-76,true)
+    textAt(layout.title,layout.x-layout.w*.5+layout.titleInset,layout.top-21,23,p.white,layout.w-layout.titleInset,true)
     if layout.stamp then
         local stamp=layout.stamp
         style.panel(stamp.x,stamp.y,stamp.w,stamp.h,false,13)

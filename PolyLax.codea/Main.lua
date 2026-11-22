@@ -2,6 +2,11 @@
 PolyLax = PolyLax or {}
 local P = PolyLax
 local state
+local openRoad, openRoadActivity
+
+local function roadPlayPage(page)
+    return page=="ROAD_PRACTICE" or page=="ROAD_TRYOUT"
+end
 
 local function navigate(page)
     local previous = state.page
@@ -34,10 +39,24 @@ end
 local function editingAthlete()
     if state.clubsCreator then return state.clubs.player end
     if state.careerCreator then return state.career end
+    if state.storyCreator then return state.road.story.athlete end
 end
 
 local function saveClubPlayer(candidate)
     return P.Clubs.savePlayer(state.clubs,candidate)
+end
+
+local function saveStoryPlayer(candidate)
+    return P.Story.updateAthlete(state.road.story,candidate)
+end
+
+local function creatorSave()
+    if state.clubsCreator then return saveClubPlayer end
+    if state.storyCreator then return saveStoryPlayer end
+end
+
+local function storyCreatorLocked()
+    return state.road.play~=nil or state.road.story.results.tryout~=nil
 end
 
 local function creatorFallback()
@@ -58,6 +77,8 @@ local function creatorCategories()
     local athlete = editingAthlete()
     if state.clubsCreator then
         return P.Athlete.categories(athlete,true,clubPositionMutable())
+    elseif state.storyCreator then
+        return P.Athlete.categories(athlete,storyCreatorLocked())
     elseif athlete then
         return P.Athlete.categories(athlete,state.careerPlay~=nil)
     end
@@ -128,12 +149,12 @@ end
 local function openCreator(athlete, section)
     if state.creatorMode~=athlete then state.categoryIndex=4 end
     state.creatorMode = athlete
-    state.careerCreator, state.clubsCreator = athlete == true, athlete == "clubs"
+    state.careerCreator, state.clubsCreator, state.storyCreator = athlete == true, athlete == "clubs", athlete=="story"
     state.careerKit="home"
     if section then state.categoryIndex=section end
     local profile = editingAthlete()
     if profile then
-        P.Athlete.ensure(profile,creatorFallback(),state.clubsCreator and saveClubPlayer or nil)
+        P.Athlete.ensure(profile,creatorFallback(),creatorSave())
     end
     if not state.creator then
         local scene = configuredScene()
@@ -157,6 +178,115 @@ local function beginPresentation(play,kind,options)
     options=options or {}
     options.frame=P.UI.practiceLayout(play.game.positioning ~= nil).frame
     return P.Presentation.start(play,kind,options)
+end
+
+local function roadNotice(message)
+    return {speaker="Road to Glory",text=message,choices={{label="Continue",select=function() end}}}
+end
+
+local function leaveRoad()
+    local road=state.road
+    local saved,reason=P.Story.saveLocation(road.story,P.FreeRoam.location(road.roam))
+    if not saved then
+        P.FreeRoam.speak(road.roam,roadNotice(reason or "Could not save your campus location."))
+        return false
+    end
+    P.FreeRoam.release(road.roam)
+    return true
+end
+
+local function roadEvent(event, message)
+    if not event then return message and roadNotice(message) or nil end
+    local road=state.road
+    if event.kind=="dialogue" then
+        local choices={}
+        for _,choice in ipairs(event.choices or {}) do
+            choices[#choices+1]={label=choice.label,select=function()
+                return roadEvent(P.Story.choose(road.story,event,choice.id))
+            end}
+        end
+        return {speaker=event.speaker,text=event.text,choices=choices}
+    end
+    if not leaveRoad() then return end
+    if event.kind=="activity" then
+        openRoadActivity(event.activity)
+    elseif event.kind=="shop" then
+        road.shop=P.RoadEquipmentUI.new(configuredScene(),P.RoadToGlory.appearance(road),
+            road.story.equipment,P.RoadToGlory.stickType(road),function(candidate)
+                return P.Story.saveEquipment(road.story,candidate)
+            end)
+        openMenu("ROAD_SHOP")
+    elseif event.kind=="clubs" then
+        state.roadReturn=true
+        openClubs()
+    end
+end
+
+local function roadAction(id)
+    if id=="pause" then return end
+    if id=="equipment" then
+        if state.road.roam.zone=="drip" then
+            local dialogue=roadEvent(P.Story.interact(state.road.story,"drip"))
+            if dialogue then P.FreeRoam.speak(state.road.roam,dialogue) end
+        else P.FreeRoam.notice(state.road.roam,"Visit the Drip Lab to change your equipment.") end
+        return
+    end
+    if not leaveRoad() then return end
+    if id=="career" then openMenu("ROAD_JOURNAL")
+    elseif id=="settings" then
+        state.roadReturn=true
+        openClubs("SETTINGS")
+    elseif id=="home" then
+        openMenu("FRONT")
+    end
+end
+
+openRoad = function()
+    local road=state.road
+    if not road then
+        road=P.RoadToGlory.new(state.profile)
+        state.road=road
+    end
+    if road.play and road.play.recorded then road.play=nil end
+    if road.roam then
+        P.FreeRoam.appearance(road.roam,P.RoadToGlory.appearance(road),road.story.equipment,P.RoadToGlory.stickType(road))
+    else
+        road.roam=P.FreeRoam.new({
+            profile=P.RoadToGlory.appearance(road),career=road.story.athlete,
+            location=road.story.location,equipment=road.story.equipment,
+            stickType=P.RoadToGlory.stickType(road),
+            objective=function()
+                local title,detail=P.Story.objective(road.story)
+                return title.." · "..detail
+            end,
+            interact=function(point) return roadEvent(P.Story.interact(road.story,point.id)) end,
+            action=roadAction,
+            save=function(location) return P.Story.saveLocation(road.story,location) end,
+            schedule=function() return road.story.timeOfDay end
+        })
+    end
+    state.roadReturn=nil
+    openMenu("ROAD")
+    if road.message then
+        P.FreeRoam.speak(road.roam,roadNotice(road.message))
+        road.message=nil
+    end
+end
+
+openRoadActivity = function(activity)
+    local road=state.road
+    local play=road.play
+    if play and play.activity~=activity then
+        P.FreeRoam.speak(road.roam,roadNotice("Finish your current lacrosse activity first."))
+        return
+    end
+    if not play then
+        play=P.RoadToGlory.newPlay(road,configuredScene(),activity)
+        road.play=play
+        if play.controller==P.FullMatch then beginPresentation(play,"pregame") end
+    end
+    play.captureAttempted=nil
+    openMenu(play.controller==P.Gameplay and "ROAD_PRACTICE" or "ROAD_TRYOUT")
 end
 
 local function settleUltimate(play)
@@ -229,6 +359,7 @@ local function statTouch(touch)
     if P.StatsUI.touch(view,P.StatsUI.layout(view),touch)=="close" then
         if state.statReturn == "ULTIMATE" then openUltimate()
         elseif state.statReturn == "ULTIMATE_RECORD" then navigate("ULTIMATE")
+        elseif state.statReturn == "ROAD" then openRoad()
         else navigate(state.statReturn) end
         state.statView,state.statReturn=nil,nil
     end
@@ -282,7 +413,7 @@ local function finishName()
     if not state.careerName then return end
     if state.careerNamePart then
         P.Athlete.rename(editingAthlete(),creatorFallback(),state.careerNamePart,state.careerName,
-            state.clubsCreator and saveClubPlayer or nil)
+            creatorSave())
         local play=state.careerCreator and state.careerPlay
         if play then
             local player=P.FullMatch.careerAthlete(play.game)
@@ -515,6 +646,10 @@ local function activePlay(page)
     if page == "TRAINING" then return state.training,P.Gameplay end
     if page == "MATCH" then return state.match, P.FullMatch end
     if page == "ULTIMATE_MATCH" then return state.ultimatePlay, P.FullMatch end
+    if roadPlayPage(page) then
+        local play=state.road and state.road.play
+        return play,play and play.controller
+    end
     if page == "CAREER_GAME" then return state.careerPlay, P.FullMatch end
     if page == "CLUB_MATCH" then return state.clubPlay, state.clubPlay.controller end
     return state.practice, P.Gameplay
@@ -527,9 +662,10 @@ end
 local function menuLayout()
     local play = state.resumePage and activePlay(state.resumePage)
     local ultimatePause = state.page=="PAUSE" and state.resumePage=="ULTIMATE_MATCH"
+    local roadPause = state.page=="PAUSE" and roadPlayPage(state.resumePage)
     return P.Style.screenLayout(state.page,{resetEnabled=not (play and
-        (play.recorded or ultimatePause and play.game.phase=="FINAL")),
-        statsEnabled=play and play.game.statistics~=nil,ultimatePause=ultimatePause})
+        (play.recorded or (ultimatePause or roadPause) and play.game.phase=="FINAL")),
+        statsEnabled=play and play.game.statistics~=nil,ultimatePause=ultimatePause,roadPause=roadPause})
 end
 
 local clubStages = {"highSchool", "college", "professional"}
@@ -606,7 +742,8 @@ local function clubLayout()
         host=host,canReopen=canRequest and host and lobby.phase=="final",
         interrupted=interrupted,canRecover=canRequest and interrupted,confirmRecovery=state.clubConfirmRecover,
         canResume=lobby and lobby.phase=="match" and state.clubPlay~=nil,
-        menuMuted=state.menuAssets.muted,hasMenuTheme=state.menuAssets.hasTheme
+        menuMuted=state.menuAssets.muted,hasMenuTheme=state.menuAssets.hasTheme,
+        campusReturn=state.roadReturn
     })
 end
 
@@ -659,7 +796,9 @@ local function clubsTouch(touch)
     local view = state.clubView
     finishClubEdit()
     if id == "BACK" then
-        if view == "CLUBS" or view == "SETTINGS" then openMenu("FRONT") else openClubs() end
+        if view == "CLUBS" or view == "SETTINGS" then
+            if state.roadReturn then openRoad() else openMenu("FRONT") end
+        else openClubs() end
     elseif id == "CREATE" then
         local saved = state.clubs.club
         state.clubName = saved and saved.name or ""
@@ -678,7 +817,7 @@ local function clubsTouch(touch)
     elseif id == "MY_PLAYER" then
         openCreator("clubs",1)
     elseif id == "CREATOR" then
-        openCreator()
+        openCreator(state.roadReturn and "story" or nil)
     elseif id == "DEVELOPMENT" then
         openDevelopment(true)
     elseif id == "MENU_MUSIC" then
@@ -717,12 +856,14 @@ local function menuTouch(touch)
         if button.enabled~=false and P.UI.hit(button,touch.x,touch.y) then
             local id = button.id
             if id=="CREATOR" then openCreator(state.page=="PAUSE" and state.resumePage=="CAREER_GAME" or nil)
+            elseif id=="ROAD" then openRoad()
             elseif id=="CAREER" then openCareer()
-            elseif id=="CLUBS" then openClubs()
+            elseif id=="CLUBS" then state.roadReturn=nil openClubs()
             elseif id=="ULTIMATE" then openUltimate()
-            elseif id=="SETTINGS" then openClubs("SETTINGS")
+            elseif id=="SETTINGS" then state.roadReturn=nil openClubs("SETTINGS")
             elseif id=="PRACTICE" or id=="MATCH" then openPlay(id)
             elseif id=="HOME" and state.page=="PAUSE" and state.resumePage=="ULTIMATE_MATCH" then openUltimate()
+            elseif id=="HOME" and state.page=="PAUSE" and roadPlayPage(state.resumePage) then openRoad()
             elseif id=="MODES" or id=="HOME" then openMenu(id=="HOME" and "FRONT" or id)
             elseif id=="RESUME" and state.resumePage then navigate(state.resumePage)
             elseif id=="STATS" and state.resumePage then
@@ -731,6 +872,7 @@ local function menuTouch(touch)
             elseif id=="RESET" and state.resumePage then
                 local play,controller=activePlay(state.resumePage)
                 if play and not play.recorded then resetPlaySession(play,controller,state.resumePage) end
+                if play and state.resumePage=="ROAD_PRACTICE" then play.game.clock=play.duration end
                 navigate(state.resumePage)
             end
             return
@@ -925,7 +1067,9 @@ end
 
 local function finishPresentation(play,kind)
     if kind=="postgame" or kind=="championship" then
-        openStats(play.game,state.page=="ULTIMATE_MATCH" and "ULTIMATE" or state.page)
+        local destination=state.page=="ULTIMATE_MATCH" and "ULTIMATE"
+            or roadPlayPage(state.page) and "ROAD" or state.page
+        openStats(play.game,destination)
         return true
     end
 end
@@ -1008,6 +1152,16 @@ function draw()
         P.Style.fade(state.pageAge)
         return
     end
+    if state.page=="ROAD" then
+        P.FreeRoam.draw(state.road.roam,dt)
+        return
+    elseif state.page=="ROAD_JOURNAL" then
+        P.RoadToGlory.drawJournal(state.road)
+        return
+    elseif state.page=="ROAD_SHOP" then
+        P.RoadEquipmentUI.draw(state.road.shop,dt)
+        return
+    end
     if state.page=="STATS" then
         P.StatsUI.draw(P.StatsUI.layout(state.statView))
         P.Style.fade(state.pageAge)
@@ -1061,7 +1215,16 @@ function draw()
             saveCareerResult(play)
         end
         if state.page == "ULTIMATE_MATCH" and not play.rewardAttempted then settleUltimate(play) end
-        if controller==P.Gameplay then updateTrainingReward(play,state.page) end
+        if roadPlayPage(state.page) then
+            if not play.captureAttempted then
+                local ok,message=P.RoadToGlory.capture(state.road,play)
+                if ok~=nil then
+                    play.recorded,play.captureAttempted=ok,true
+                    if not ok then state.road.message=message or "Could not save this activity. Reenter to retry." end
+                    if controller==P.Gameplay then openRoad() return end
+                end
+            end
+        elseif controller==P.Gameplay then updateTrainingReward(play,state.page) end
         if controller==P.FullMatch or online then
             if not online then
                 matchPresentation(play)
@@ -1107,6 +1270,8 @@ local function updateChoice(index)
         end
         if state.clubsCreator then
             P.Athlete.select(athlete,nil,selection,index,true,saveClubPlayer,clubPositionMutable())
+        elseif state.storyCreator then
+            P.Athlete.select(athlete,state.profile,selection,index,storyCreatorLocked(),saveStoryPlayer)
         else
             P.Athlete.select(athlete,state.profile,selection,index,state.careerPlay~=nil)
         end
@@ -1135,6 +1300,7 @@ local function creatorTouch(touch, hud)
             finishName()
             if state.clubsCreator then openClubs()
             elseif state.careerCreator then openCareer()
+            elseif state.storyCreator then openRoad()
             else openMenu("FRONT") end
             return
         end
@@ -1287,15 +1453,18 @@ local function playTouch(touch, hud)
         if not online and P.UI.hit(hud.edit, touch.x, touch.y) then
             if state.pick then controller.command(game,"releasepick",0,0) end
             if state.page=="TRAINING" then openDevelopment()
+            elseif roadPlayPage(state.page) then openRoad()
             elseif state.page=="CAREER_GAME" then openCareer() else openCreator() end
             return
         end
         if not online and P.UI.hit(hud.reset, touch.x, touch.y) then
             if (state.page == "CAREER_GAME" and play.recorded)
-                or (state.page == "ULTIMATE_MATCH" and game.phase == "FINAL") then return end
+                or ((state.page == "ULTIMATE_MATCH" or roadPlayPage(state.page)) and game.phase == "FINAL")
+                or (roadPlayPage(state.page) and play.recorded) then return end
             P.UI.press(hud, hud.reset, touch.id)
             clearPlayInput()
             resetPlaySession(play,controller,state.page)
+            if state.page=="ROAD_PRACTICE" then play.game.clock=play.duration end
             return
         end
         if P.UI.hit(hud.camera, touch.x, touch.y) then
@@ -1370,6 +1539,17 @@ function touched(touch)
         if action == "HOME" then openMenu("FRONT")
         elseif action == "PLAY" then openUltimateMatch()
         elseif action == "BOX_SCORE" then openStats(boxScore,"ULTIMATE_RECORD") end
+    elseif state.page=="ROAD" then
+        P.FreeRoam.touch(state.road.roam,touch)
+    elseif state.page=="ROAD_JOURNAL" then
+        local action=P.RoadToGlory.journalTouch(state.road,touch)
+        if action=="BACK" then openRoad()
+        elseif action=="PLAYER" then openCreator("story",1) end
+    elseif state.page=="ROAD_SHOP" then
+        if P.RoadEquipmentUI.touch(state.road.shop,touch)=="BACK" then
+            state.road.shop=nil
+            openRoad()
+        end
     elseif state.page == "CREATOR" then
         creatorTouch(touch, currentHUDLayout())
     elseif state.page == "CAREER" then
@@ -1399,14 +1579,15 @@ function setup()
     startupError = nil
     runChecked("PolyLax could not start", function()
         assert(type(runSetup) == "function" and type(runFrame) == "function",
-            "Install the complete PolyLax 3.3.1 Main tab.")
+            "Install the complete PolyLax Road to Glory Main tab.")
         local modules = PolyLax or {}
         local missing = {}
         for _, name in ipairs({
             "Profile", "TeamUniform", "Character", "AnimationController",
             "CameraController", "GoalPhysics", "Gameplay", "Field", "Midfield", "MatchAI", "FullMatch", "SpecialistShift",
             "Defense", "Faceoff", "MatchRules", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
-            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation", "Clubs", "ClubsUI", "ClubsMatch", "ClubsNet", "MenuShowcase", "MenuAssets", "Ultimate", "UltimateUI", "UltimateMatch"
+            "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation", "Clubs", "ClubsUI", "ClubsMatch", "ClubsNet", "MenuShowcase", "MenuAssets", "Ultimate", "UltimateUI", "UltimateMatch",
+            "StoryChapters", "Story", "RoadEquipment", "RoadEquipmentUI", "FreeRoamWorld", "FreeRoamUI", "FreeRoam", "RoadToGlory"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

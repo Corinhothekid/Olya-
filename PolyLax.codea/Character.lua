@@ -231,16 +231,16 @@ local function dressTorso(r)
             {.19, .30, .185}, {.32, .35, .22}, {.66, .39, .226},
             {.78, .40, .207}, {.87, .25, .15}
         }, 8, math.pi / 8, true)
-    end)
+    end, r.campusHidden)
     part(r, r.body, "neck", m.skin, function(mesh)
         bevel(mesh, 0, .98, .006, .24, .35, .26)
     end)
     part(r, r.body, "collar", m.jerseyTrim, function(mesh)
         rail(mesh, .019, {V(-.15, .863, -.155), V(0, .80, -.208), V(.15, .863, -.155)})
-    end)
+    end, r.campusHidden)
     part(r, r.pelvis, "shorts waist", m.shorts, function(mesh)
         bevel(mesh, 0, .104, .01, .764, .33, .46)
-    end)
+    end, r.campusHidden)
     r.numberMark = entity(r.scene, r.body)
 
     part(r, r.body, "hoodie exterior", m.hoodie, function(mesh)
@@ -283,10 +283,10 @@ local function arm(r, sign, name)
     end)
     part(r, shoulder, "jersey sleeve", m.jersey, function(mesh)
         bevel(mesh, 0, -.047, .002, .28, .265, .352)
-    end)
+    end, r.campusHidden)
     part(r, shoulder, "jersey cuff", m.jerseyTrim, function(mesh)
         box(mesh, 0, -.131, -.171, .21, .034, .025)
-    end)
+    end, r.campusHidden)
     part(r, shoulder, "hoodie upper sleeve", m.hoodie, function(mesh)
         bevel(mesh, 0, -.111, .002, .293, .444, .355)
     end, r.hoodieParts)
@@ -296,18 +296,18 @@ local function arm(r, sign, name)
     part(r, elbow, "elbow pads", m.silver, function(mesh)
         bevel(mesh, 0, -.049, -.105, .231, .20, .107)
         bevel(mesh, 0, -.052, .1, .196, .139, .067)
-    end)
-    part(r, wrist, "glove shell", m.gloves, function(mesh)
+    end, r.campusHidden)
+    r.arms[name].glove = part(r, wrist, "glove shell", m.gloves, function(mesh)
         bevel(mesh, 0, .047, .008, .245, .293, .237)
         bevel(mesh, 0, .128, .001, .267, .101, .234)
-    end)
+    end, r.campusHidden)
     part(r, wrist, "glove joints", m.gloveTrim, function(mesh)
         for i = -1, 1 do
             bevel(mesh, i * .066, -.025, -.089, .054, .118, .068)
         end
         bevel(mesh, 0, .065, -.09, .181, .038, .067)
         bevel(mesh, 0, .122, -.112, .212, .021, .033)
-    end)
+    end, r.campusHidden)
 end
 
 local function leg(r, sign, name)
@@ -327,7 +327,7 @@ local function leg(r, sign, name)
             {-.232, .144, .187, -.002}, {-.177, .177, .218},
             {.025, .182, .221}, {.066, .154, .20}
         }, 8, math.pi / 8, true)
-    end)
+    end, r.campusHidden)
     part(r, hip, "thigh", m.skin, function(mesh)
         bevel(mesh, 0, -.319, -.006, .235, .346, .239)
     end, exposedLeg)
@@ -344,12 +344,12 @@ local function leg(r, sign, name)
     end, sleeve)
     part(r, knee, "sock", m.white, function(mesh)
         bevel(mesh, 0, -.382, .002, .219, .174, .24)
-    end)
+    end, r.campusHidden)
     part(r, ankle, "cleat", m.cleats, function(mesh)
         loft(mesh, {{-.106, .145, .231, -.092}, {-.04, .151, .23, -.092},
             {.04, .124, .168, -.044}, {.092, .104, .116, .013}},
             8, math.pi / 8, true)
-    end)
+    end, r.campusHidden)
     part(r, ankle, "cleat sole", m.dark, function(mesh)
         bevel(mesh, 0, -.113, -.093, .305, .039, .476)
         for _, x in ipairs({-.085, .085}) do
@@ -357,13 +357,13 @@ local function leg(r, sign, name)
                 box(mesh, x, -.129, z, .039, .022, .046)
             end
         end
-    end)
+    end, r.campusHidden)
     part(r, ankle, "cleat lace", m.white, function(mesh)
         for i = 0, 2 do
             local y, z = .044 + .016 * i, -.186 + .046 * i
             bar(mesh, V(-.065, y, z), V(.065, y, z), .008, 4)
         end
-    end)
+    end, r.campusHidden)
 end
 
 local function makeHead(r)
@@ -849,7 +849,7 @@ function Character.new(scene)
         armLengthUpper = .33, armLengthLower = .31,
         legLengthUpper = .46, legLengthLower = .44,
         ankleHeight = .14, pelvisHeight = 1.04,
-        hoodieParts = {}, helmetParts = {}, stickParts = {},
+        hoodieParts = {}, helmetParts = {}, stickParts = {}, campusHidden = {},
         sleeveParts = {left = {}, right = {}}, exposedLegParts = {left = {}, right = {}}
     }
     r.root = entity(scene)
@@ -887,6 +887,29 @@ end
 
 local function option(profile, key, max)
     return math.min(max, math.max(1, math.floor(tonumber(profile[key]) or defaults[key])))
+end
+
+function Character.setCampusMode(rig, campus)
+    rig.campus = campus == true
+    show(rig.campusHidden, not rig.campus)
+    rig.numberMark.active = not rig.campus
+    if not rig.campus then
+        rig.stickRoot.parent = rig.body
+        return
+    end
+    show(rig.helmetParts,false)
+    show(rig.hoodieParts,true)
+    show(rig.stickParts,true)
+    local haircut = option(rig.profile or defaults,"HAIR",6)
+    for i=2,6 do rig.hairParts[i].active = i==haircut end
+    for _, side in ipairs({"left","right"}) do
+        show(rig.sleeveParts[side],false)
+        show(rig.exposedLegParts[side],false)
+    end
+end
+
+function Character.equipmentEnvironment()
+    return studioEnvironment()
 end
 
 local function applyHelmetFinish(r, chromeFinish)

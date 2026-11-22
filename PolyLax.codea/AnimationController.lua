@@ -235,6 +235,15 @@ local function placeArms(rig, pose, pocketTarget, pocketWeight)
         rig.armLengthUpper, rig.armLengthLower, vec3(-.82,-.82,.32))
 end
 
+local function swingCampusArm(rig, side, phase)
+    local joints = rig.joints
+    local shoulder = joints[side.."Shoulder"]
+    local outer = side=="left" and -.08 or .08
+    local target = shoulder.position + vec3(outer,-.59+.07*math.abs(phase),phase*.28)
+    solveLimb(shoulder,joints[side.."Elbow"],target,
+        rig.armLengthUpper,rig.armLengthLower,vec3(outer,-.10,-1))
+end
+
 local function placeLeg(rig, hip, knee, ankle, target, pitch, yaw)
     local upper, lower = solveLimb(hip, knee, target - rig.pelvis.position,
         rig.legLengthUpper, rig.legLengthLower, vec3(0,0,-1))
@@ -356,7 +365,9 @@ function Animation.update(controller, dt, input)
             -controller.turn * (4 + gait * 7) + swing * 2),
         crouch = 0, roll = cradle * 21 + swing * 8, freeHand = 0
     }
-    if rig.stickType == "long" then
+    if rig.campus then
+        base.torso = vec3(-gait*(2+run*5),swing*3,-controller.turn*gait*4)
+    elseif rig.stickType == "long" then
         base.grip = vec3(.30 + cradle * .031, .68 + breath * .012 + swing * .025,
             -.38 + swing * .053 + cradle * .028)
         base.shaft = vec3(.52 + cradle * .09, .85 - cradle * .06,
@@ -411,7 +422,12 @@ function Animation.update(controller, dt, input)
     joints.head.eulerAngles = vec3(-pose.torso.x * .48, -pose.torso.y * .60, -pose.torso.z * .55)
     placeLeg(rig, joints.leftHip, joints.leftKnee, joints.leftAnkle, left, leftPitch, 6)
     placeLeg(rig, joints.rightHip, joints.rightKnee, joints.rightAnkle, right, rightPitch, -6)
-    placeArms(rig, pose, pocketTarget, pocketWeight)
+    if rig.campus then
+        swingCampusArm(rig,"left",swing)
+        swingCampusArm(rig,"right",-swing)
+    else
+        placeArms(rig, pose, pocketTarget, pocketWeight)
+    end
     return event
 end
 
