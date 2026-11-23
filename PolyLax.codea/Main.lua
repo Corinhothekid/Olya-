@@ -1579,7 +1579,7 @@ function setup()
     startupError = nil
     runChecked("PolyLax could not start", function()
         assert(type(runSetup) == "function" and type(runFrame) == "function",
-            "Install the complete PolyLax 3.4.2 Main tab.")
+            "Install the complete PolyLax 3.4.3 Main tab.")
         local modules = PolyLax or {}
         local missing = {}
         for _, name in ipairs({
@@ -1587,7 +1587,8 @@ function setup()
             "CameraController", "GoalPhysics", "Gameplay", "Field", "Midfield", "MatchAI", "FullMatch", "SpecialistShift",
             "Defense", "Faceoff", "MatchRules", "UI", "Career", "CareerUI", "SchoolTeams", "CareerSeason",
             "Passing", "Tactics", "Screens", "Style", "Athlete", "Attributes", "Development", "Statistics", "StatsUI", "League", "Awards", "AwardUI", "Presentation", "Clubs", "ClubsUI", "ClubsMatch", "ClubsNet", "MenuShowcase", "MenuAssets", "Ultimate", "UltimateUI", "UltimateMatch",
-            "StoryChapters", "Story", "RoadEquipment", "RoadEquipmentUI", "FreeRoamWorld", "FreeRoamUI", "FreeRoam", "RoadToGlory"
+            "StoryChapters", "Story", "RoadEquipment", "RoadEquipmentUI", "CampusPeople", "CampusCharacter",
+            "CampusMotion", "FreeRoamWorld", "FreeRoamUI", "FreeRoam", "RoadToGlory"
         }) do
             if type(modules[name]) ~= "table" then
                 missing[#missing + 1] = name

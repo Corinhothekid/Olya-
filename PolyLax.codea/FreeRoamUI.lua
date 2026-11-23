@@ -18,7 +18,7 @@ local names = {
 }
 
 local actions = {
-    ethan="Talk", coach="Talk", jace="Talk", clubs="ENTER PRO CLUBS",
+    ethan="Talk", coach="Talk", jace="Talk", maya="Talk", clubs="ENTER PRO CLUBS",
     tryout="Start Tryout", practice="Practice", training="Train", drip="Browse Gear"
 }
 

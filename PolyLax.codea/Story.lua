@@ -253,6 +253,15 @@ function Story.interact(save, target)
     elseif target=="jace" then
         return line(target, save.relationships.jace>=30 and "“Show up early. We can work through a set of clears.”"
             or "“I’ll let your next shift do the talking.”")
+    elseif target=="maya" then
+        local debut=save.results.debut
+        if debut and finite(debut.homeScore) and finite(debut.awayScore) then
+            return line(target, ("“I’ve got the %d–%d final. The school paper is covering your first game.”")
+                :format(math.floor(debut.homeScore),math.floor(debut.awayScore)))
+        end
+        return line(target,save.results.tryout and
+            "“How did the tryout feel from the field? I’m collecting quotes for the Briarbank paper.”" or
+            "“Maya Brooks, school paper. I’m following the freshman lacrosse class this year. See you at the field.”")
     elseif target=="tryout" then
         return line(target,"Your assignment is posted on the objective tracker.")
     end

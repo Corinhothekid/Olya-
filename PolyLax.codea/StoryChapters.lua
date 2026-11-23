@@ -6,7 +6,7 @@ PolyLax.StoryChapters = Chapter
 Chapter.title = "Brothers in Arms"
 Chapter.act = "Act I · The Freshmen"
 Chapter.characters = {
-    ethan="Ethan Cole", coach="Coach Daniel Mercer", jace="Jace Holloway",
+    ethan="Ethan Cole", coach="Coach Daniel Mercer", jace="Jace Holloway", maya="Maya Brooks",
     drip="Nina Reyes", tryout="Locker Room", practice="Practice Field",
     training="Trainer Avery"
 }

@@ -141,9 +141,10 @@ function FreeRoam.appearance(roam, profile, equipment, stickType)
     if P.RoadEquipment.stow then P.RoadEquipment.stow(roam.rig) end
 end
 
-function FreeRoam.speak(roam, dialogue)
+function FreeRoam.speak(roam, dialogue, actorId)
     FreeRoam.release(roam)
     roam.dialogue = dialogue
+    roam.dialogueActor = dialogue and (actorId or roam.dialogueActor) or nil
     if dialogue then roam.paused = false end
 end
 
@@ -162,7 +163,7 @@ function FreeRoam.interact(roam)
         FreeRoam.checkpoint(roam)
         if roam.onInteract then
             local dialogue = roam.onInteract(point,roam)
-            if type(dialogue) == "table" then FreeRoam.speak(roam,dialogue) end
+            if type(dialogue) == "table" then FreeRoam.speak(roam,dialogue,point.id) end
         end
     end
     return true
@@ -221,7 +222,7 @@ function FreeRoam.update(roam, dt)
     end
     roam.timeOfDay = roam.schedule and roam.schedule()
     if P.FreeRoamWorld.update and not roam.paused then
-        P.FreeRoamWorld.update(roam.world,dt,roam.timeOfDay,roam.x,roam.z)
+        P.FreeRoamWorld.update(roam.world,dt,roam.timeOfDay,roam.x,roam.z,roam.dialogueActor)
     end
     P.AnimationController.update(roam.animation,dt,{speed=speed,turn=turn})
     if P.RoadEquipment.stow then P.RoadEquipment.stow(roam.rig) end

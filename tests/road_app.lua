@@ -436,6 +436,16 @@ finishActivity()
 assert(road.story.mission=="complete" and road.story.results.debut)
 assert(road.story.ethan.statTotals.games>=1 and road.story.athlete.games==1)
 
+interact("maya")
+assert(roam.dialogue and roam.dialogue.speaker=="Maya Brooks" and roam.dialogueActor=="maya")
+assert(roam.dialogue.text:find("final",1,true),"Maya did not recognize the debut result")
+frames(8)
+for _,actor in ipairs(roam.world.actors) do
+    if actor.id=="maya" then assert(actor.motion.mode=="talk") end
+end
+dialogue()
+assert(not roam.dialogueActor and road.story.mission=="complete")
+
 visit("clubhouse")
 near("clubs")
 tap(P.FreeRoamUI.layout(roam).orbitRight)

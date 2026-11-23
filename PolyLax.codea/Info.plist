@@ -55,6 +55,9 @@
 		<string>RoadEquipment</string>
 		<string>Story</string>
 		<string>RoadEquipmentUI</string>
+		<string>CampusPeople</string>
+		<string>CampusCharacter</string>
+		<string>CampusMotion</string>
 		<string>FreeRoamWorld</string>
 		<string>FreeRoamUI</string>
 		<string>FreeRoam</string>

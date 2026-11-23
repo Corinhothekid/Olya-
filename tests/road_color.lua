@@ -25,7 +25,8 @@ local materialMeta = {
 function craft.material() return setmetatable({},materialMeta) end
 
 for _,tab in ipairs({"TeamUniform","Profile","Character","AnimationController","CameraController",
-    "UI","Style","GoalPhysics","RoadEquipment","RoadEquipmentUI","FreeRoamWorld","FreeRoamUI","FreeRoam"}) do
+    "UI","Style","GoalPhysics","RoadEquipment","RoadEquipmentUI","CampusPeople",
+    "CampusCharacter","CampusMotion","FreeRoamWorld","FreeRoamUI","FreeRoam"}) do
     dofile(project.."/"..tab..".lua")
 end
 
