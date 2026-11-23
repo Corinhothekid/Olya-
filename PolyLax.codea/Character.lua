@@ -2,6 +2,12 @@
 PolyLax = PolyLax or {}
 local Character = {}
 PolyLax.Character = Character
+Character.campusScale = .74
+local dimensions = {
+    shoulderX=.49, shoulderY=.73, armUpper=.33, armLower=.31,
+    hipX=.205, legUpper=.46, legLower=.44, ankle=.14, pelvis=1.04, headY=1.18
+}
+Character.rigDimensions = dimensions
 
 local white = color(236, 240, 242)
 local black = color(34, 39, 48)
@@ -224,19 +230,45 @@ local function rail(mesh, radius, points, sides)
     end
 end
 
+local function athleteNeck(mesh)
+    bevel(mesh, 0, .98, .006, .24, .35, .26)
+end
+
+local function jerseyExterior(mesh)
+    -- Keep the hem seated at the hip even when the upper body twists.
+    loft(mesh, {
+        {.035, .237, .149}, {.075, .278, .164}, {.136, .303, .190}, {.228, .325, .208},
+        {.32, .35, .22}, {.66, .39, .226}, {.78, .40, .207}, {.87, .25, .15}
+    }, 8, math.pi / 8, true)
+end
+
+local function hoodieExterior(mesh)
+    loft(mesh, {
+        {.040, .251, .160}, {.085, .294, .180}, {.154, .328, .204}, {.240, .355, .225},
+        {.31, .373, .236}, {.66, .404, .239},
+        {.79, .405, .228}, {.88, .255, .17}
+    }, 8, math.pi / 8, true)
+    loft(mesh, {
+        {.695, .13, .105, .24}, {.785, .225, .165, .25},
+        {.92, .24, .164, .226}, {1.045, .201, .108, .208},
+        {1.095, .12, .059, .188}
+    }, 8, math.pi / 8)
+end
+
+local function hoodieTrim(mesh)
+    rail(mesh, .015, {V(-.171, 1.01, .11), V(-.12, 1.075, .129),
+        V(0, 1.09, .124), V(.12, 1.075, .129), V(.171, 1.01, .11)})
+    rail(mesh, .011, {V(-.23, .298, -.232), V(-.181, .32, -.245),
+        V(-.112, .405, -.247), V(.112, .405, -.247),
+        V(.181, .32, -.245), V(.23, .298, -.232)})
+    rail(mesh, .009, {V(-.11, .833, -.205), V(-.084, .765, -.231), V(-.101, .675, -.241)})
+    rail(mesh, .009, {V(.11, .833, -.205), V(.102, .76, -.234), V(.094, .655, -.242)})
+end
+
 local function dressTorso(r)
     local m = r.materials
-    part(r, r.body, "jersey", m.jersey, function(mesh)
-        -- Keep the hem seated at the hip even when the upper body twists.
-        loft(mesh, {
-            {.035, .237, .149}, {.075, .278, .164}, {.136, .303, .190}, {.228, .325, .208},
-            {.32, .35, .22}, {.66, .39, .226},
-            {.78, .40, .207}, {.87, .25, .15}
-        }, 8, math.pi / 8, true)
-    end, r.campusHidden)
-    part(r, r.body, "neck", m.skin, function(mesh)
-        bevel(mesh, 0, .98, .006, .24, .35, .26)
-    end)
+    part(r, r.body, "jersey", m.jersey, jerseyExterior, r.campusHidden)
+    part(r, r.body, "neck", m.skin, athleteNeck)
     part(r, r.body, "collar", m.jerseyTrim, function(mesh)
         rail(mesh, .019, {V(-.15, .863, -.155), V(0, .80, -.208), V(.15, .863, -.155)})
     end, r.campusHidden)
@@ -245,27 +277,8 @@ local function dressTorso(r)
     end, r.campusHidden)
     r.numberMark = entity(r.scene, r.body)
 
-    part(r, r.body, "hoodie exterior", m.hoodie, function(mesh)
-        loft(mesh, {
-            {.040, .251, .160}, {.085, .294, .180}, {.154, .328, .204}, {.240, .355, .225},
-            {.31, .373, .236}, {.66, .404, .239},
-            {.79, .405, .228}, {.88, .255, .17}
-        }, 8, math.pi / 8, true)
-        loft(mesh, {
-            {.695, .13, .105, .24}, {.785, .225, .165, .25},
-            {.92, .24, .164, .226}, {1.045, .201, .108, .208},
-            {1.095, .12, .059, .188}
-        }, 8, math.pi / 8)
-    end, r.hoodieParts)
-    part(r, r.body, "hoodie trim", m.hoodTrim, function(mesh)
-        rail(mesh, .015, {V(-.171, 1.01, .11), V(-.12, 1.075, .129),
-            V(0, 1.09, .124), V(.12, 1.075, .129), V(.171, 1.01, .11)})
-        rail(mesh, .011, {V(-.23, .298, -.232), V(-.181, .32, -.245),
-            V(-.112, .405, -.247), V(.112, .405, -.247),
-            V(.181, .32, -.245), V(.23, .298, -.232)})
-        rail(mesh, .009, {V(-.11, .833, -.205), V(-.084, .765, -.231), V(-.101, .675, -.241)})
-        rail(mesh, .009, {V(.11, .833, -.205), V(.102, .76, -.234), V(.094, .655, -.242)})
-    end, r.hoodieParts)
+    part(r, r.body, "hoodie exterior", m.hoodie, hoodieExterior, r.hoodieParts)
+    part(r, r.body, "hoodie trim", m.hoodTrim, hoodieTrim, r.hoodieParts)
 end
 
 local function gloveShell(mesh)
@@ -277,11 +290,31 @@ function Character.gloveModel()
     return model("glove shell",gloveShell)
 end
 
+local function hoodieUpperSleeve(mesh)
+    bevel(mesh, 0, -.111, .002, .293, .444, .355)
+end
+
+local function hoodieLowerSleeve(mesh)
+    bevel(mesh, 0, -.123, 0, .217, .326, .246)
+end
+
+function Character.campusApparel(part)
+    if part=="hoodie" then
+        return model("hoodie exterior",hoodieExterior),model("hoodie trim",hoodieTrim)
+    elseif part=="jersey" then
+        return model("jersey",jerseyExterior)
+    elseif part=="upperArm" then
+        return model("hoodie upper sleeve",hoodieUpperSleeve)
+    elseif part=="forearm" then
+        return model("hoodie lower sleeve",hoodieLowerSleeve)
+    end
+end
+
 local function arm(r, sign, name)
     local m = r.materials
-    local shoulder = entity(r.scene, r.body, sign * .49, .73, 0)
-    local elbow = entity(r.scene, shoulder, 0, -.33, 0)
-    local wrist = entity(r.scene, elbow, 0, -.31, 0)
+    local shoulder = entity(r.scene, r.body, sign * dimensions.shoulderX, dimensions.shoulderY, 0)
+    local elbow = entity(r.scene, shoulder, 0, -r.armLengthUpper, 0)
+    local wrist = entity(r.scene, elbow, 0, -r.armLengthLower, 0)
     r.joints[name .. "Shoulder"] = shoulder
     r.joints[name .. "Elbow"] = elbow
     r.joints[name .. "Wrist"] = wrist
@@ -299,12 +332,8 @@ local function arm(r, sign, name)
     part(r, shoulder, "jersey cuff", m.jerseyTrim, function(mesh)
         box(mesh, 0, -.131, -.171, .21, .034, .025)
     end, r.campusHidden)
-    part(r, shoulder, "hoodie upper sleeve", m.hoodie, function(mesh)
-        bevel(mesh, 0, -.111, .002, .293, .444, .355)
-    end, r.hoodieParts)
-    part(r, elbow, "hoodie lower sleeve", m.hoodie, function(mesh)
-        bevel(mesh, 0, -.123, 0, .217, .326, .246)
-    end, r.hoodieParts)
+    part(r, shoulder, "hoodie upper sleeve", m.hoodie, hoodieUpperSleeve, r.hoodieParts)
+    part(r, elbow, "hoodie lower sleeve", m.hoodie, hoodieLowerSleeve, r.hoodieParts)
     part(r, elbow, "elbow pads", m.silver, function(mesh)
         bevel(mesh, 0, -.049, -.105, .231, .20, .107)
         bevel(mesh, 0, -.052, .1, .196, .139, .067)
@@ -321,9 +350,9 @@ end
 
 local function leg(r, sign, name)
     local m = r.materials
-    local hip = entity(r.scene, r.pelvis, sign * .205, 0, 0)
-    local knee = entity(r.scene, hip, 0, -.46, 0)
-    local ankle = entity(r.scene, knee, 0, -.44, 0)
+    local hip = entity(r.scene, r.pelvis, sign * dimensions.hipX, 0, 0)
+    local knee = entity(r.scene, hip, 0, -r.legLengthUpper, 0)
+    local ankle = entity(r.scene, knee, 0, -r.legLengthLower, 0)
     r.joints[name .. "Hip"] = hip
     r.joints[name .. "Knee"] = knee
     r.joints[name .. "Ankle"] = ankle
@@ -375,11 +404,12 @@ local function leg(r, sign, name)
     end, r.campusHidden)
 end
 
-local function makeHead(r)
-    local m = r.materials
-    r.head = entity(r.scene, r.body, 0, 1.18, 0)
-    r.joints.head = r.head
-    part(r, r.head, "head", m.skin, function(mesh)
+local sharedHead
+
+local function headGeometry()
+    if sharedHead then return sharedHead end
+    local geometry={face={},hair={},beard={}}
+    geometry.shell = model("head",function(mesh)
         loft(mesh, {
             {-.269, .105, .113, -.067}, {-.21, .204, .191, -.037},
             {-.079, .265, .240, -.024}, {.116, .283, .251, -.015},
@@ -390,7 +420,6 @@ local function makeHead(r)
             bevel(mesh, s * .274, .016, .015, .080, .155, .125)
         end
     end)
-    r.faceParts = {}
     local faceDetails = {
         { eyes = .112, brow = .180, gap = .132, nose = .070, mouth = .119 },
         { eyes = .111, brow = .186, gap = .148, nose = .085, mouth = .145 },
@@ -399,19 +428,19 @@ local function makeHead(r)
     }
     for i, face in ipairs(faceDetails) do
         local group = {}
-        r.faceParts[i] = group
-        part(r, r.head, "face nose " .. i, m.skin, function(mesh)
+        geometry.face[i] = group
+        group[1]=model("face nose " .. i,function(mesh)
             loft(mesh, {{-.036, face.nose * .51, .041, -.259},
                 {.002, face.nose * .55, .060, -.271},
                 {.093, face.nose * .34, .033, -.254},
                 {.15, face.nose * .29, .011, -.241}}, 6)
-        end, group)
-        part(r, r.head, "eye flats " .. i, m.white, function(mesh)
+        end)
+        group[2]=model("eye flats " .. i,function(mesh)
             for _, s in ipairs({-1, 1}) do
                 bevel(mesh, s * face.gap, face.eyes, -.244, .095, .045, .035)
             end
-        end, group)
-        part(r, r.head, "face expression " .. i, m.dark, function(mesh)
+        end)
+        group[3]=model("face expression " .. i,function(mesh)
             for _, s in ipairs({-1, 1}) do
                 bevel(mesh, s * (face.gap - .009), face.eyes, -.259, .038, .041, .02)
                 rail(mesh, .011, {V(s * (face.gap - .053), face.brow - .008, -.257),
@@ -420,13 +449,11 @@ local function makeHead(r)
             end
             rail(mesh, .009, {V(-face.mouth * .5, -.113, -.251), V(0, -.12, -.268),
                 V(face.mouth * .5, -.113, -.251)}, 4)
-        end, group)
+        end)
     end
 
-    r.hairRoot = entity(r.scene, r.head)
-    r.hairParts = {}
     for i = 2, 6 do
-        r.hairParts[i] = part(r, r.hairRoot, "hair " .. i, m.hair, function(mesh)
+        geometry.hair[i]=model("hair " .. i,function(mesh)
             local back = i == 6 and -.016 or .118
             loft(mesh, {{back, .255, .128, .123}, {.226, .278, .226, .056},
                 {.31, .273, .254, .008}, {.369, .227, .216, .016},
@@ -462,10 +489,8 @@ local function makeHead(r)
             end
         end)
     end
-    r.beardRoot = entity(r.scene, r.head)
-    r.beardParts = {}
     for i = 2, 6 do
-        r.beardParts[i] = part(r, r.beardRoot, "beard " .. i, m.beard, function(mesh)
+        geometry.beard[i]=model("beard " .. i,function(mesh)
             if i == 3 or i == 4 or i >= 5 then
                 for _, s in ipairs({-1, 1}) do
                     rail(mesh, i == 3 and .021 or .015, {V(s * .012, -.066, -.279),
@@ -486,6 +511,97 @@ local function makeHead(r)
             end
         end)
     end
+    sharedHead=geometry
+    return geometry
+end
+
+local function bind(part,geometry,material)
+    part.model=geometry
+    part.material=material
+end
+
+local function headPart(r,parent,geometry,material)
+    local e=entity(r.scene,parent)
+    bind(e,geometry,material)
+    return e
+end
+
+local function makeHead(r)
+    local m,geometry=r.materials,headGeometry()
+    r.head=entity(r.scene,r.body,0,dimensions.headY,0)
+    r.joints.head=r.head
+    r.headShell=headPart(r,r.head,geometry.shell,m.skin)
+    r.faceParts={}
+    for i,face in ipairs(geometry.face) do
+        r.faceParts[i]={headPart(r,r.head,face[1],m.skin),headPart(r,r.head,face[2],m.white),
+            headPart(r,r.head,face[3],m.dark)}
+    end
+    r.hairRoot,r.beardRoot=entity(r.scene,r.head),entity(r.scene,r.head)
+    r.hairParts,r.beardParts={},{}
+    for i=2,6 do
+        r.hairParts[i]=headPart(r,r.hairRoot,geometry.hair[i],m.hair)
+        r.beardParts[i]=headPart(r,r.beardRoot,geometry.beard[i],m.beard)
+    end
+end
+
+local campusFaces={oval=1,angular=2,round=3,long=4}
+local campusHair={none=1,crop=2,neat=2,sweep=3,curls=5,bun=6,bob=6,braids=6}
+local portraitWhite,portraitInk,portraitGold
+
+local function glassesMesh(mesh)
+    for _,side in ipairs({-1,1}) do
+        rail(mesh,.008,{V(side*.058,.147,-.294),V(side*.211,.147,-.272),
+            V(side*.211,.064,-.272),V(side*.058,.064,-.289),V(side*.058,.147,-.294)},4)
+        bar(mesh,V(side*.211,.144,-.272),V(side*.288,.130,.010),.008,4)
+    end
+    bar(mesh,V(-.058,.129,-.294),V(.058,.129,-.294),.008,4)
+end
+
+local function earringsMesh(mesh)
+    for _,side in ipairs({-1,1}) do
+        bevel(mesh,side*.300,-.041,-.017,.023,.036,.022)
+    end
+end
+
+-- The campus uses the same selected head meshes as the creator and match,
+-- with its own joints and lighting so no helmet or inactive variants are needed.
+function Character.applyCampusHead(r,look)
+    local geometry=headGeometry()
+    if not r.campusPortrait then
+        portraitWhite=portraitWhite or material(white)
+        portraitInk=portraitInk or material(dark)
+        r.campusPortrait={skin=material(skin[2]),hair=material(hair[2]),beard=material(hair[2])}
+        r.faceParts={entity(r.scene,r.head),entity(r.scene,r.head),entity(r.scene,r.head)}
+        r.hairPart=entity(r.scene,r.head)
+        r.beardPart=entity(r.scene,r.head)
+    end
+    local m=r.campusPortrait
+    local complexion,tint=color(table.unpack(look.skin)),color(table.unpack(look.hair))
+    local face=look.faceIndex or campusFaces[look.headShape] or 1
+    local haircut=look.hairIndex or campusHair[look.haircut] or 1
+    local beard=look.beardStyle or (look.beard and 5 or 1)
+    r.faceIndex,r.hairIndex,r.beardIndex=face,haircut,beard
+    m.skin.diffuse,m.hair.diffuse=complexion,tint
+    m.beard.diffuse=mix(tint,complexion,beard==2 and .62 or .12)
+    bind(r.face,geometry.shell,m.skin)
+    bind(r.neck,model("neck",athleteNeck),m.skin)
+    bind(r.faceParts[1],geometry.face[face][1],m.skin)
+    bind(r.faceParts[2],geometry.face[face][2],portraitWhite)
+    bind(r.faceParts[3],geometry.face[face][3],portraitInk)
+    r.hairPart.active=haircut>1
+    r.beardPart.active=beard>1
+    if r.hairPart.active then bind(r.hairPart,geometry.hair[haircut],m.hair) end
+    if r.beardPart.active then bind(r.beardPart,geometry.beard[beard],m.beard) end
+
+    if look.glasses and not r.glasses then
+        r.glasses=headPart(r,r.head,model("campus glasses",glassesMesh),portraitInk)
+    end
+    if look.earrings and not r.earrings then
+        portraitGold=portraitGold or material(color(226,173,61),.44)
+        r.earrings=headPart(r,r.head,model("campus earrings",earringsMesh),portraitGold)
+    end
+    if r.glasses then r.glasses.active=look.glasses==true end
+    if r.earrings then r.earrings.active=look.earrings==true end
 end
 
 -- Half contours go from the nose of the molded visor around each ear to the nape.
@@ -865,9 +981,9 @@ function Character.new(scene)
     local r = {
         scene = scene,
         joints = {}, arms = {}, legs = {},
-        armLengthUpper = .33, armLengthLower = .31,
-        legLengthUpper = .46, legLengthLower = .44,
-        ankleHeight = .14, pelvisHeight = 1.04,
+        armLengthUpper = dimensions.armUpper, armLengthLower = dimensions.armLower,
+        legLengthUpper = dimensions.legUpper, legLengthLower = dimensions.legLower,
+        ankleHeight = dimensions.ankle, pelvisHeight = dimensions.pelvis,
         hoodieParts = {}, helmetParts = {}, stickParts = {}, campusHidden = {},
         sleeveParts = {left = {}, right = {}}, exposedLegParts = {left = {}, right = {}}
     }
@@ -906,6 +1022,13 @@ end
 
 local function option(profile, key, max)
     return math.min(max, math.max(1, math.floor(tonumber(profile[key]) or defaults[key])))
+end
+
+function Character.bodyScale(profile)
+    profile=profile or defaults
+    local size=bodySizes[option(profile,"BODY",#bodySizes)]
+    local athlete=PolyLax.Athlete
+    return V(size[1],athlete and athlete.heightScale(profile) or size[2],size[1])
 end
 
 function Character.setCampusMode(rig, campus)
@@ -1044,8 +1167,5 @@ function Character.apply(r, profile, category, uniform, personalKit)
         r.numberValue = value
     end
 
-    local size = bodySizes[option(profile, "BODY", #bodySizes)]
-    local athlete = PolyLax.Athlete
-    local chosenHeight = athlete and athlete.heightScale(profile)
-    r.proportions.scale = V(size[1], chosenHeight or size[2], size[1])
+    r.proportions.scale = Character.bodyScale(profile)
 end

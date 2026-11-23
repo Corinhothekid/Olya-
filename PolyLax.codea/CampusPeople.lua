@@ -68,7 +68,6 @@ local haircuts={"sweep","crop","neat","bun","bob","curls","braids"}
 local playerSkin={{247,208,174},{213,161,119},{168,110,77},{105,69,52}}
 local playerHair={{27,24,25},{27,24,25},{94,59,35},{190,140,69},{132,66,46},{52,39,33}}
 local playerHaircuts={"none","crop","sweep","neat","curls","bob"}
-local builds={{.96,.97,"slim"},{1,1,"athletic"},{1.025,1,"broad"},{.98,1.10,"athletic"}}
 
 local function choice(profile,key,default,length)
     local value=tonumber(profile[key])
@@ -80,11 +79,11 @@ function People.player(profile)
     profile=profile or {}
     local face=choice(profile,"FACE",2,#playerSkin)
     local haircut=choice(profile,"HAIR",3,#playerHaircuts)
-    local width,height,frame=table.unpack(builds[choice(profile,"BODY",2,#builds)])
-    local athlete=PolyLax.Athlete
-    return {id="player",role="athlete",width=width,height=athlete and athlete.heightScale(profile) or height,
-        frame=frame,headShape=headShapes[face],skin=copy(playerSkin[face]),hair=copy(playerHair[haircut]),
-        haircut=playerHaircuts[haircut],beardStyle=choice(profile,"BEARD",1,6),outfit="hoodie",motion="player"}
+    local size=PolyLax.Character.bodyScale(profile)
+    return {id="player",role="athlete",width=size.x,height=size.y,frame="athletic",
+        headShape=headShapes[face],faceIndex=face,skin=copy(playerSkin[face]),hair=copy(playerHair[haircut]),
+        haircut=playerHaircuts[haircut],hairIndex=haircut,beardStyle=choice(profile,"BEARD",1,6),
+        outfit="hoodie",motion="player"}
 end
 
 local roles={

@@ -6,6 +6,9 @@ P.CampusCharacter = Character
 
 local V = vec3
 local sides = {-1,1}
+local scale = P.Character.campusScale
+local dimensions = P.Character.rigDimensions
+local matchScale = V(scale,scale,scale)
 local partCache = {}
 
 local function rgbKey(rgb)
@@ -38,17 +41,14 @@ end
 
 function Character.apply(rig,look)
     local geometry = P.CampusHumanMeshes
-    local skin,hair,shirt,trim,pants = rgbKey(look.skin),rgbKey(look.hair),rgbKey(look.shirt),
+    local skin,shirt,trim,pants = rgbKey(look.skin),rgbKey(look.shirt),
         rgbKey(look.trim),rgbKey(look.pants)
     local patterns = look.patternKeys or {}
     local frame = ({slim=.94,athletic=1,broad=1.065})[look.frame] or 1
-    local head = table.concat({look.headShape or "oval",skin,hair,trim,look.haircut or "none",
-        tostring(look.beardStyle or look.beard),tostring(look.glasses),tostring(look.earrings)},"/")
     local torso = table.concat({look.outfit,shirt,trim,look.accessory or "",skin,patterns.hoodie or ""},"/")
     rig.root.scale = V((look.width or 1)*frame,look.height or 1,(look.width or 1)*frame)
-    rig.face.scale = V(look.faceWidth or 1,look.faceHeight or 1,1)
-    applyMesh(rig.face,"head",geometry.head,head,look)
-    applyMesh(rig.neck,"neck",geometry.neck,skin,look)
+    rig.head.scale = V(scale*(look.faceWidth or 1),scale*(look.faceHeight or 1),scale)
+    P.Character.applyCampusHead(rig,look)
     applyMesh(rig.outfit,"body",geometry.body,torso,look)
     applyMesh(rig.waist,"pelvis",geometry.pelvis,pants,look)
 
@@ -71,7 +71,7 @@ function Character.apply(rig,look)
     local hasPack = look.pack or look.accessory == "pack"
     if hasPack then
         if not rig.backpack then
-            rig.backpack = node(rig.scene,rig.body,0,.300,.094)
+            rig.backpack = node(rig.scene,rig.body,0,.31,.14)
         end
         local key = table.concat({rgbKey(look.pack or look.trim),rgbKey(look.packTrim or look.shirt),
             look.backpackStyle or "campus",patterns.backpack or "",tostring(look.carriesStick)},"/")
@@ -85,21 +85,22 @@ function Character.new(scene,look)
     local root = node(scene)
     local rig = {scene=scene,root=root,arms={},elbows={},wrists={},legs={},knees={},ankles={},
         sleeves={},forearms={},thighs={},shins={},hands={},feet={}}
-    rig.pelvis = node(scene,root,0,1.01,0)
-    rig.torso = node(scene,rig.pelvis,0,.060,0)
+    rig.pelvis = node(scene,root,0,dimensions.pelvis*scale,0)
+    rig.torso = node(scene,rig.pelvis)
     rig.body = rig.torso
     rig.waist = node(scene,rig.pelvis)
     rig.outfit = node(scene,rig.torso)
-    rig.neck = node(scene,rig.torso,0,.598,0)
-    rig.head = node(scene,rig.torso,0,.636,0)
-    rig.face = node(scene,rig.head,0,.115,0)
+    rig.neck = node(scene,rig.torso)
+    rig.neck.scale = matchScale
+    rig.head = node(scene,rig.torso,0,dimensions.headY*scale,0)
+    rig.face = node(scene,rig.head)
     for i,side in ipairs(sides) do
-        local shoulder = node(scene,rig.torso,side*.185,.535,0)
-        local elbow = node(scene,shoulder,0,-.285,0)
-        local wrist = node(scene,elbow,0,-.247,0)
-        local hip = node(scene,rig.pelvis,side*.087,0,0)
-        local knee = node(scene,hip,0,-.455,0)
-        local ankle = node(scene,knee,0,-.456,0)
+        local shoulder = node(scene,rig.torso,side*dimensions.shoulderX*scale,dimensions.shoulderY*scale,0)
+        local elbow = node(scene,shoulder,0,-dimensions.armUpper*scale,0)
+        local wrist = node(scene,elbow,0,-dimensions.armLower*scale,0)
+        local hip = node(scene,rig.pelvis,side*dimensions.hipX*scale,0,0)
+        local knee = node(scene,hip,0,-dimensions.legUpper*scale,0)
+        local ankle = node(scene,knee,0,-dimensions.legLower*scale,0)
         rig.sleeves[i] = node(scene,shoulder)
         rig.forearms[i] = node(scene,elbow)
         rig.thighs[i] = node(scene,hip)

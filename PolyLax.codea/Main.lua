@@ -1579,7 +1579,7 @@ function setup()
     startupError = nil
     runChecked("PolyLax could not start", function()
         assert(type(runSetup) == "function" and type(runFrame) == "function",
-            "Install the complete PolyLax 3.4.6 Main tab.")
+            "Install the complete PolyLax 3.4.7 Main tab.")
         local modules = PolyLax or {}
         local missing = {}
         for _, name in ipairs({

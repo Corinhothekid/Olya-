@@ -1,4 +1,4 @@
--- Smooth indexed meshes for the articulated campus rig. Local front is -Z.
+-- Faceted clothing and gear for the campus version of the game rig. Local front is -Z.
 PolyLax = PolyLax or {}
 local Human = {}
 PolyLax.CampusHumanMeshes = Human
@@ -56,14 +56,14 @@ end
 
 -- A ring lattice shares vertices through the curves. Cap vertices are separate,
 -- so contact surfaces such as soles and garment openings can retain clean edges.
-local function surface(mesh,count,n,point,ink,sample)
+local function surface(mesh,count,n,point,ink)
     local start=#mesh.positions
     local angles=ringAngles(n)
     for row=1,count do
         local v=(row-1)/(count-1)
         for _,angle in ipairs(angles) do
             local s,c,u=angle[1],angle[2],angle[3]
-            vertex(mesh,point(row,s,c),sample and sample(u,v,ink) or ink,u,v)
+            vertex(mesh,point(row,s,c),ink,u,v)
         end
     end
     for row=0,count-2 do
@@ -91,13 +91,53 @@ local function surface(mesh,count,n,point,ink,sample)
 end
 
 -- Sections contain height, half-width, half-depth, and optional depth/lateral shift.
-local function loft(mesh,rings,n,ink,warp,sample)
+local function loft(mesh,rings,n,ink)
     surface(mesh,#rings,n,function(row,s,c)
         local ring=rings[row]
         local x,y,z=(ring[5] or 0)+ring[2]*s,ring[1],(ring[4] or 0)-ring[3]*c
-        if warp then x,y,z=warp(x,y,z,s,c,row) end
         return V(x,y,z)
-    end,ink,sample)
+    end,ink)
+end
+
+-- The game rig's eight-sided contours meet at visible facet edges. Keep the
+-- same crease on campus clothes and avoid a separate smooth-surface style.
+local function classicLoft(mesh,rings,ink,sample)
+    local rows={}
+    for i,ring in ipairs(rings) do
+        local row={}
+        for side=0,7 do
+            local angle=side*tau/8+math.pi/8
+            local x,z=sin(angle),cos(angle)
+            local scale=math.max(math.abs(x),math.abs(z))
+            row[side+1]=V((ring[5] or 0)+ring[2]*x/scale,ring[1],(ring[4] or 0)-ring[3]*z/scale)
+        end
+        rows[i]=row
+    end
+    for i=1,#rows-1 do
+        local bottom,top=rows[i],rows[i+1]
+        local low,high=(i-1)/(#rows-1),i/(#rows-1)
+        for side=1,8 do
+            local nextSide=side%8+1
+            local left,right=(side-1)/8,side/8
+            local paint=sample and sample((left+right)*.5,(low+high)*.5,ink) or ink
+            local a=vertex(mesh,bottom[side],paint,left,low)
+            local b=vertex(mesh,top[side],paint,left,high)
+            local c=vertex(mesh,top[nextSide],paint,right,high)
+            local d=vertex(mesh,bottom[nextSide],paint,right,low)
+            triangle(mesh,a,b,c)
+            triangle(mesh,a,c,d)
+        end
+    end
+    for _,i in ipairs({1,#rings}) do
+        local ring,row=rings[i],rows[i]
+        local center=vertex(mesh,V(ring[5] or 0,ring[1],ring[4] or 0),ink,.5,.5)
+        local indices={}
+        for side=1,8 do indices[side]=vertex(mesh,row[side],ink,.5,.5) end
+        for side=1,8 do
+            local a,b=indices[side],indices[side%8+1]
+            if i==1 then triangle(mesh,center,a,b) else triangle(mesh,center,b,a) end
+        end
+    end
 end
 
 local function oval(mesh,x,y,z,rx,ry,rz,ink,n)
@@ -130,321 +170,117 @@ local function strand(mesh,path,wide,deep,ink,n)
     end,ink)
 end
 
-local function chestWarp(outfit)
-    local relaxed=outfit=="hoodie" and 1 or outfit=="polo" and .94 or .98
-    return function(x,y,z,s,c)
-        return x*relaxed,y,z-(c>0 and c*(1-c)*.024 or 0)
+local atan2=math.atan2 or math.atan
+
+local function addMatchMesh(mesh,source,ink,sample,low,high)
+    local offset=#mesh.positions
+    local positions,normals=source.positions,source.normals
+    local rigScale=PolyLax.Character.campusScale
+    for i,p in ipairs(positions) do
+        local u=(atan2(p.x,-p.z)/tau)%1
+        local v=low and math.max(0,math.min(1,(p.y-low)/(high-low))) or .5
+        local index=vertex(mesh,p*rigScale,sample and sample(u,v,ink) or ink,u,v)
+        mesh.normals[index]=normals[i]
     end
+    for _,index in ipairs(source.indices) do
+        mesh.indices[#mesh.indices+1]=offset+index
+    end
+end
+
+local function classicBevel(mesh,x,y,z,w,h,d,ink)
+    classicLoft(mesh,{{y-h*.5,w*.38,d*.38,z,x},{y-h*.3,w*.5,d*.5,z,x},
+        {y+h*.3,w*.5,d*.5,z,x},{y+h*.5,w*.38,d*.38,z,x}},ink)
 end
 
 function Human.body(look)
     local cloth,trim=dye(look.shirt),dye(look.trim)
-    local edge=tone(look.shirt,.73)
-    local highlight=tone(look.shirt,1.13)
+    local edge=tone(look.shirt,.70)
     return meshModel(function(mesh)
-        -- Let the hem hang below the torso pivot into the trousers during turns.
-        loft(mesh,{{-.096,.151,.104,.007},{-.082,.159,.114,.006},{-.049,.164,.119,.004},
-            {.035,.164,.118,.005},
-            {.120,.160,.116,.009},{.220,.163,.105,.009},{.330,.178,.124,.004},
-            {.432,.188,.127,.007},{.505,.184,.114,.013},{.549,.156,.084,.013},
-            {.584,.105,.065,.013},{.602,.059,.052,.008}},14,cloth,
-            chestWarp(look.outfit),look.inks and look.inks.hoodie)
         local outfit=look.outfit
         if outfit=="hoodie" then
-            -- The hood is a folded collar with its opening visible near the neck.
-            loft(mesh,{{.346,.044,.042,.110},{.395,.092,.064,.121},{.464,.111,.077,.108},
-                {.521,.102,.081,.087},{.558,.077,.064,.076},{.574,.050,.044,.066}},12,cloth)
-            strand(mesh,{V(-.087,.507,.054),V(-.065,.553,.057),V(-.030,.566,.095),
-                V(.029,.566,.095),V(.065,.553,.057),V(.088,.506,.052)},.008,.010,edge,6)
-            for _,side in ipairs(sides) do
-                strand(mesh,{V(side*.063,.573,-.052),V(side*.079,.510,-.085),
-                    V(side*.067,.435,-.122),V(side*.073,.355,-.127)},.004,.004,highlight)
-                strand(mesh,{V(side*.082,.185,-.107),V(side*.109,.130,-.098),
-                    V(side*.104,.103,-.094)},.004,.003,edge)
+            local body,details=PolyLax.Character.campusApparel("hoodie")
+            addMatchMesh(mesh,body,cloth,look.inks and look.inks.hoodie,.040,1.095)
+            addMatchMesh(mesh,details,trim)
+        else
+            addMatchMesh(mesh,PolyLax.Character.campusApparel("jersey"),cloth)
+            if outfit=="jacket" or outfit=="varsity" or outfit=="cardigan" then
+                strand(mesh,{V(0,.162,-.155),V(0,.337,-.168),V(0,.503,-.164),V(0,.607,-.136)},
+                    .007,.006,outfit=="varsity" and trim or edge)
+                for _,side in ipairs(sides) do
+                    strand(mesh,{V(side*.058,.634,-.111),V(side*.105,.590,-.147),
+                        V(side*.129,.555,-.160)},.012,.008,trim)
+                    strand(mesh,{V(side*.102,.250,-.166),V(side*.158,.220,-.165),
+                        V(side*.193,.189,-.156)},.006,.004,edge)
+                end
+                if outfit=="cardigan" then
+                    for i=1,3 do oval(mesh,.011,.175+i*.105,-.174,.007,.007,.004,trim,6) end
+                end
+            elseif outfit=="polo" then
+                for _,side in ipairs(sides) do
+                    strand(mesh,{V(side*.041,.630,-.124),V(side*.083,.603,-.143),
+                        V(side*.116,.560,-.165),V(side*.066,.555,-.166)},.013,.010,trim)
+                end
+                strand(mesh,{V(0,.598,-.148),V(0,.544,-.165),V(0,.488,-.174)},.009,.006,edge)
+            elseif outfit=="apron" then
+                classicLoft(mesh,{{.144,.162,.016,-.151},{.195,.175,.019,-.157},
+                    {.369,.177,.020,-.164},{.496,.144,.019,-.163},
+                    {.553,.105,.014,-.157}},trim)
+                strand(mesh,{V(-.096,.535,-.171),V(-.101,.599,-.149),V(-.052,.647,-.110),
+                    V(.052,.647,-.110),V(.101,.599,-.149),V(.096,.535,-.171)},.012,.006,trim)
             end
-            loft(mesh,{{.076,.084,.022,-.100},{.086,.106,.023,-.100},{.130,.109,.028,-.102},
-                {.167,.087,.019,-.101},{.177,.065,.010,-.103}},10,cloth)
-        elseif outfit=="jacket" or outfit=="varsity" or outfit=="cardigan" then
-            local seam=outfit=="varsity" and trim or edge
-            strand(mesh,{V(0,.032,-.115),V(0,.150,-.113),V(0,.257,-.110),V(0,.410,-.125),
-                V(0,.522,-.101),V(0,.577,-.056)},.005,.004,seam)
-            for _,side in ipairs(sides) do
-                strand(mesh,{V(side*.042,.591,-.042),V(side*.060,.565,-.059),
-                    V(side*.089,.527,-.084),V(side*.106,.504,-.089)},.010,.008,trim)
-                strand(mesh,{V(side*.070,.156,-.102),V(side*.113,.112,-.077),
-                    V(side*.123,.074,-.072)},.004,.004,edge)
-            end
-            if outfit=="cardigan" then
-                for i=1,3 do oval(mesh,.009,.115+i*.104,-.121,.006,.006,.004,trim,6) end
-            else
-                strand(mesh,{V(0,.446,-.126),V(0,.474,-.120)},.009,.004,trim)
-            end
-        elseif outfit=="polo" then
-            for _,side in ipairs(sides) do
-                strand(mesh,{V(side*.039,.596,-.040),V(side*.065,.567,-.062),
-                    V(side*.061,.526,-.090),V(side*.020,.554,-.077)},.010,.007,trim)
-            end
-            strand(mesh,{V(0,.532,-.089),V(0,.476,-.111),V(0,.420,-.122)},.010,.003,edge)
-            oval(mesh,0,.453,-.120,.005,.006,.004,trim,6)
-        elseif outfit=="apron" then
-            loft(mesh,{{.016,.112,.015,-.108},{.035,.125,.017,-.107},{.237,.118,.023,-.102},
-                {.411,.099,.019,-.117},{.470,.077,.012,-.110}},10,trim)
-            strand(mesh,{V(-.059,.454,-.122),V(-.088,.529,-.085),V(-.045,.584,-.045),
-                V(.047,.583,-.044),V(.085,.529,-.085),V(.056,.450,-.122)},.010,.005,trim)
         end
         if look.accessory=="lanyard" then
-            strand(mesh,{V(-.053,.570,-.062),V(-.057,.480,-.130),V(-.046,.395,-.137),
-                V(-.017,.295,-.123),V(.022,.297,-.123),V(.050,.395,-.137),
-                V(.062,.478,-.125),V(.053,.569,-.060)},.004,.004,trim)
-            loft(mesh,{{.224,.021,.004,-.128,.009},{.231,.024,.006,-.129,.009},
-                {.284,.024,.006,-.129,.009},{.291,.021,.004,-.128,.009}},8,chalk)
-            strand(mesh,{V(-.008,.272,-.135),V(.022,.272,-.135)},.003,.003,trim)
+            strand(mesh,{V(-.056,.626,-.122),V(-.066,.571,-.168),V(-.044,.475,-.184),
+                V(-.017,.379,-.183),V(.022,.381,-.183),V(.052,.475,-.184),
+                V(.069,.571,-.168),V(.056,.626,-.122)},.005,.005,trim)
+            classicBevel(mesh,.008,.349,-.185,.042,.060,.013,chalk)
         end
     end)
 end
 
 function Human.pelvis(look)
     return meshModel(function(mesh)
-        -- The shaped seat fills the space between the moving thighs and the shirt.
-        loft(mesh,{{-.145,.110,.062,.014},{-.105,.135,.083,.014},{-.056,.155,.104,.011},
-            {-.009,.164,.114,.006},{.046,.161,.110,.008},{.103,.149,.103,.006},
-            {.144,.129,.088,.006}},12,
-            dye(look.pants),function(x,y,z,s,c)
-                local bottom=math.max(0,math.min(1,-y/.145))
-                return x,y+bottom*.041*(1-s*s),z+bottom*.017*math.max(0,c)
-            end)
+        -- The joint sits inside the waistband and the two thighs overlap its lower edge.
+        classicLoft(mesh,{{-.149,.133,.080,.009},{-.117,.200,.104,.009},
+            {-.061,.249,.143,.009},{.001,.265,.150,.007},{.068,.272,.148,.005},
+            {.121,.254,.139,.004},{.158,.218,.123,.003}},dye(look.pants))
     end)
 end
 
-function Human.neck(look)
-    return meshModel(function(mesh)
-        loft(mesh,{{-.036,.063,.054,.007},{-.015,.060,.051,.005},
-            {.023,.048,.046,.008},{.059,.046,.045,.006},{.101,.056,.043,-.003}},10,dye(look.skin))
-    end)
-end
-
-local jawWidths={oval=1,angular=1.10,round=1.08,long=.91}
-
-local function faceWarp(x,y,z,s,c)
-    local f=math.max(0,c)
-    local cheek=math.max(0,1-math.abs(y+.032)*26)
-    local hollow=math.max(0,1-math.abs(y-.026)*46)
-    z=z-cheek*(1-c*c)*f*.028+hollow*(1-c*c)*f*.038
-    return x,y,z
-end
-
-local function eyesAndNose(mesh,look,skin)
-    local topLid=tone(look.skin,.57,{11,4,3})
-    local bottomLid=tone(look.skin,.86,{6,1,0})
-    local iris=look.skin[1]<160 and color(59,44,32) or color(83,77,53)
-    local eyebrow=tone(look.hair,.71,{11,9,7})
-    for _,side in ipairs(sides) do
-        local x=side*.044
-        loft(mesh,{{.016,.007,.004,-.094,x},{.020,.014,.008,-.094,x},
-            {.025,.021,.009,-.095,x},{.030,.017,.008,-.095,x},
-            {.034,.009,.005,-.094,x}},10,color(209,204,190))
-        oval(mesh,x-side*.001,.025,-.103,.006,.007,.004,iris,8)
-        oval(mesh,x-side*.002,.025,-.106,.003,.004,.002,color(31,26,23),6)
-        oval(mesh,x-.002,.028,-.107,.0016,.0016,.0012,chalk,6)
-        strand(mesh,{V(x-.020,.025,-.096),V(x-.010,.032,-.103),V(x+.006,.034,-.103),
-            V(x+.017,.029,-.100),V(x+.020,.025,-.096)},.0018,.0016,topLid,5)
-        strand(mesh,{V(x-.018,.023,-.096),V(x-.009,.018,-.102),V(x+.008,.019,-.103),
-            V(x+.018,.023,-.096)},.0017,.0015,bottomLid,5)
-        strand(mesh,{V(side*.022,.047,-.108),V(side*.038,.054,-.109),
-            V(side*.056,.057,-.101),V(side*.075,.049,-.088)},.0041,.0035,eyebrow)
-    end
-    loft(mesh,{{-.033,.009,.005,-.108},{-.028,.017,.014,-.111},
-        {-.022,.017,.024,-.109},{-.011,.014,.023,-.106},{.012,.009,.016,-.103},
-        {.043,.012,.010,-.105},{.055,.010,.005,-.102}},10,skin)
-    for _,side in ipairs(sides) do
-        oval(mesh,side*.013,-.026,-.115,.009,.007,.010,skin,8)
-        oval(mesh,side*.011,-.030,-.122,.004,.002,.003,tone(look.skin,.52,{15,5,3}),6)
-        oval(mesh,side*.104,-.009,.011,.019,.046,.028,skin,10)
-        oval(mesh,side*.114,-.006,-.011,.008,.029,.007,tone(look.skin,.83,{10,2,2}),8)
-        if look.earrings then oval(mesh,side*.117,-.044,-.012,.008,.011,.007,color(224,174,88),8) end
-    end
-end
-
-local function hair(mesh,look)
-    local style=look.haircut
-    if not style or style=="none" then return end
-    local base=dye(look.hair)
-    local shine=tone(look.hair,1.06,{13,10,8})
-    local thin=style=="crop"
-    local sweep=style=="sweep" or style=="neat"
-    local volume=thin and 0 or style=="curls" and .016 or .010
-    local roots={{.083,.115,.109,.012},{.110,.124,.117,.012},{.131,.116,.108,.012},
-        {.144+volume*.66,.098,.093,.013},{.153+volume,.063,.071,.012},
-        {.157+volume,.019,.025,.012},{.159+volume,.004,.006,.013}}
-    loft(mesh,roots,14,base,function(x,y,z,s,c,row)
-        local variation=1-(row-1)/(#roots-1)
-        local rear=style=="bob" and .124 or style=="braids" and .080 or .078
-        if c<.65 then y=y-rear*variation*((.65-c)/1.65)^.67 end
-        if sweep then
-            local front=math.max(0,c)*variation
-            local wave=sin(s*2.8+.5)
-            y=y-.022*front*wave
-            x=x-(style=="neat" and .014 or .021)*front
-            z=z-.013*front*wave
-        elseif style=="curls" then
-            y=y+.008*variation*cos(8*s+4*c)
-        end
-        return x,y,z
-    end)
-    if sweep then
-        strand(mesh,{V(-.090,.104,-.066),V(-.063,.128,-.085),V(-.028,.150,-.074),
-            V(.026,.148,-.060),V(.064,.132,-.044)},.006,.009,shine,7)
-        strand(mesh,{V(-.077,.119,-.061),V(-.041,.141,-.068),V(.004,.151,-.055),
-            V(.053,.138,-.035)},.003,.006,base,6)
-        if style=="neat" then
-            local silver=tone(look.hair,1.14,{14,11,8})
-            for _,side in ipairs(sides) do
-                strand(mesh,{V(side*.111,.048,.004),V(side*.119,.073,.009),
-                    V(side*.118,.102,-.011)},.005,.005,silver,6)
-            end
-        end
-    elseif style=="curls" then
-        for i=0,5 do
-            local a=i*tau/6
-            oval(mesh,sin(a)*.079,.129+(i%2)*.015,-cos(a)*.067+.007,
-                .033,.035,.031,i==3 and shine or base,8)
-        end
-    elseif style=="bun" then
-        oval(mesh,0,.097,.122,.049,.052,.041,base,10)
-        strand(mesh,{V(-.037,.109,.140),V(-.012,.132,.153),V(.023,.126,.157),
-            V(.046,.101,.136)},.005,.004,shine)
-    elseif style=="bob" then
-        for _,side in ipairs(sides) do
-            loft(mesh,{{-.106,.011,.022,.020,side*.095},{-.091,.026,.051,.029,side*.101},
-                {-.040,.024,.072,.035,side*.109},{.037,.023,.067,.029,side*.108},
-                {.083,.019,.046,.022,side*.105}},9,base)
-        end
-    elseif style=="braids" then
-        for _,side in ipairs(sides) do
-            local path={V(side*.094,.098,.065),V(side*.114,.051,.077),
-                V(side*.122,-.015,.085),V(side*.123,-.085,.085),V(side*.107,-.159,.078)}
-            strand(mesh,path,.014,.012,base,8)
-            local braid={}
-            for i=1,4 do
-                local a,b=path[i],path[i+1]
-                for step=0,3 do
-                    local anchor=a+(b-a)*(step/4)
-                    braid[#braid+1]=anchor+V(.007*sin(step*tau/4),0,.007+.002*(step%2))
-                end
-            end
-            braid[#braid+1]=path[#path]+V(0,0,.008)
-            strand(mesh,braid,.004,.004,shine)
-            oval(mesh,side*.107,-.158,.078,.016,.008,.014,dye(look.trim),6)
-        end
-    end
-end
-
-local function beard(mesh,look)
-    local style=look.beardStyle or (look.beard and 5 or 1)
-    if style==1 then return end
-    local body=tone(look.hair,1.03,{7,6,5})
-    if style==2 then body=tone(look.skin,.68,{11,9,9}) end
-    if style==2 or style==5 or style==6 then
-        local fullness=style==6 and 1.07 or 1
-        loft(mesh,{{-.133,.026,.043,-.027},{-.122,.046,.069,-.018},
-            {-.107,.070,.082,-.011},{-.084,.085,.086,-.005},{-.064,.091,.072,.003}},
-            12,body,function(x,y,z,s,c)
-                return x*fullness,y+.022*math.abs(s),z-(c>.35 and .006*fullness or 0)
-            end)
-    elseif style==4 then
-        oval(mesh,0,-.105,-.087,.027,.022,.012,body,8)
-    end
-    if style>=3 then
-        for _,side in ipairs(sides) do
-            strand(mesh,{V(side*.003,-.043,-.110),V(side*.016,-.041,-.104),
-                V(side*.029,-.046,-.099)},.005,.003,body,6)
-        end
-    end
-end
-
-local function eyeglasses(mesh)
-    local frame=color(51,48,48)
-    for _,side in ipairs(sides) do
-        local path={}
-        for i=0,10 do
-            local a=i*tau/10
-            path[#path+1]=V(side*.045+sin(a)*.027,.026+cos(a)*.017,-.114+.096*math.abs(.045+side*sin(a)*.027))
-        end
-        strand(mesh,path,.0028,.003,frame,6)
-        strand(mesh,{V(side*.071,.030,-.108),V(side*.093,.032,-.083),
-            V(side*.114,.024,-.018),V(side*.116,.009,.000)},.003,.0035,frame,6)
-    end
-    strand(mesh,{V(-.018,.029,-.118),V(0,.037,-.124),V(.018,.029,-.118)},.003,.0028,frame,6)
-end
-
-function Human.head(look)
-    local skin=dye(look.skin)
-    local jaw=jawWidths[look.headShape] or 1
-    local mouth=tone(look.skin,.66,{20,4,8})
-    return meshModel(function(mesh)
-        loft(mesh,{{-.132,.025*jaw,.036,-.016},{-.123,.043*jaw,.063,-.010},
-            {-.105,.069*jaw,.075,.000},{-.078,.086*jaw,.090,.002},
-            {-.037,.101,.102,.004},{.005,.109,.105,.003},{.036,.110,.104,.002},
-            {.071,.110,.102,.004},{.100,.101,.093,.010},{.122,.077,.074,.013},
-            {.135,.045,.045,.015},{.139,.008,.011,.018}},16,skin,faceWarp)
-        eyesAndNose(mesh,look,skin)
-        beard(mesh,look)
-        strand(mesh,{V(-.027,-.060,-.092),V(-.015,-.064,-.100),V(0,-.062,-.105),
-            V(.015,-.063,-.099),V(.028,-.059,-.092)},.0028,.0031,mouth,6)
-        strand(mesh,{V(-.014,-.069,-.099),V(0,-.073,-.103),V(.014,-.068,-.099)},
-            .0029,.0025,tone(look.skin,.96,{12,3,5}),6)
-        hair(mesh,look)
-        if look.glasses then eyeglasses(mesh) end
-    end)
-end
-
-local armParts={
-    upperArm={{-.322,.029,.031,0},{-.305,.040,.042,0},{-.280,.043,.046,-.001},
-        {-.224,.048,.050,.004},{-.170,.054,.057,.006},{-.099,.060,.063,.006},
-        {-.047,.064,.068,.002},{-.008,.060,.065,.002},{.024,.049,.054,.005},{.044,.018,.026,.005}},
-    forearm={{-.264,.027,.029,-.003},{-.252,.033,.037,-.001},{-.225,.035,.039,0},
-        {-.177,.039,.044,.004},{-.118,.048,.051,.007},{-.064,.051,.052,.006},
-        {-.021,.045,.044,.002},{.021,.038,.036,0}},
-    thigh={{-.497,.024,.025,.001},{-.479,.055,.060,0},{-.440,.062,.064,-.011},
-        {-.382,.063,.071,-.001},{-.316,.071,.075,.009},{-.237,.077,.088,.006},
-        {-.155,.086,.092,.016},{-.070,.088,.104,.019},{.002,.079,.092,.015},{.058,.049,.054,.010}},
-    shin={{-.475,.034,.037,0},{-.460,.041,.049,0},{-.410,.046,.053,.009},
-        {-.334,.048,.061,.008},{-.267,.059,.068,.013},{-.188,.063,.079,.014},
-        {-.115,.061,.079,.014},{-.059,.053,.060,.005},{-.009,.056,.061,-.004},
-        {.033,.040,.048,-.006}}
+local legRings={
+    thigh={{-.379,.075,.078,.004},{-.358,.091,.094,.003},{-.310,.104,.110,.005},
+        {-.211,.113,.124,.010},{-.104,.123,.131,.014},{.006,.131,.135,.018},{.058,.101,.114,.018}},
+    shin={{-.349,.058,.064,0},{-.331,.065,.074,0},{-.282,.072,.086,.004},
+        {-.195,.089,.101,.005},{-.108,.097,.110,.006},{-.035,.091,.102,.004},{.034,.073,.088,.002}}
 }
 
 function Human.limb(look,part,side)
-    local isLeg=part=="thigh" or part=="shin"
-    local short=look.outfit=="polo" or look.outfit=="apron"
+    local isLeg=legRings[part]~=nil
     local upper=part=="upperArm"
-    local key=isLeg and part..(side<0 and "Left" or "Right") or nil
-    local fabric=isLeg and look.pants or (look.outfit=="varsity" and look.trim or look.shirt)
-    local skin=short and part=="forearm"
-    local ink=skin and look.skin or fabric
+    local short=look.outfit=="polo" or look.outfit=="apron"
+    local skin,cloth=dye(look.skin),dye(look.outfit=="varsity" and look.trim or look.shirt)
     return meshModel(function(mesh)
-        loft(mesh,armParts[part],10,dye(ink),function(x,y,z,s,c)
-            local fold=sin((y+.415)*31+side*s*1.25)*.045
-            local cloth=not skin and 1+fold or 1
-            local shape=look.frame=="broad" and 1.045 or look.frame=="slim" and .92 or 1
-            local sleeveRoom=not isLeg and not skin and .007 or 0
-            local shoulder=upper and math.max(0,math.min(1,(y+.12)*7.6)) or 0
-            return (x+s*sleeveRoom)*cloth*shape-side*shoulder*.020,
-                y-math.max(0,side*s)*shoulder*.022,(z-c*sleeveRoom)*cloth
-        end,key and look.inks and look.inks[key])
-        local ribbed=look.outfit=="hoodie" or look.outfit=="varsity"
-        if part=="shin" and look.outfit=="hoodie" and not (look.inks and look.inks[key]) then
-            loft(mesh,{{-.463,.041,.046},{-.452,.046,.053},{-.425,.046,.056,.002},
-                {-.417,.043,.053,.004}},10,tone(look.pants,.82))
-        elseif part=="forearm" and ribbed then
-            loft(mesh,{{-.251,.035,.038},{-.245,.041,.045},{-.217,.042,.047,.002},{-.208,.039,.043,.003}},
-                10,look.outfit=="varsity" and dye(look.shirt) or tone(look.shirt,.78))
-        elseif short and upper then
-            -- Expose the elbow through a fitted sleeve opening on polos and staff shirts.
-            loft(mesh,{{-.324,.033,.034},{-.307,.043,.043},{-.267,.044,.047},{-.226,.047,.051}},
-                10,dye(look.skin))
-            loft(mesh,{{-.248,.046,.050},{-.244,.053,.058},{-.223,.053,.058},{-.213,.049,.055}},
-                10,look.outfit=="polo" and dye(look.trim) or tone(look.shirt,.82))
+        if isLeg then
+            local ending=side<0 and "Left" or "Right"
+            local sample=look.inks and look.inks[part..ending]
+            classicLoft(mesh,legRings[part],dye(look.pants),sample)
+            if part=="shin" and look.outfit=="hoodie" and not sample then
+                classicBevel(mesh,0,-.322,-.002,.137,.042,.156,tone(look.pants,.82))
+            end
+        elseif short then
+            if upper then
+                classicBevel(mesh,0,-.138,0,.157,.276,.158,skin)
+                classicBevel(mesh,0,-.035,0,.209,.197,.236,cloth)
+                classicBevel(mesh,0,-.108,-.005,.201,.037,.200,
+                    look.outfit=="polo" and dye(look.trim) or tone(look.shirt,.82))
+            else
+                classicBevel(mesh,0,-.108,0,.143,.252,.158,skin)
+            end
+        else
+            addMatchMesh(mesh,PolyLax.Character.campusApparel(part),cloth)
+            if part=="forearm" and look.outfit=="varsity" then
+                classicBevel(mesh,0,-.190,0,.153,.036,.172,dye(look.shirt))
+            end
         end
     end)
 end
@@ -452,64 +288,37 @@ end
 function Human.hand(look,side)
     local skin=dye(look.skin)
     return meshModel(function(mesh)
-        loft(mesh,{{-.121,.024,.015,-.005},{-.108,.037,.021,-.005},{-.081,.045,.025,-.003},
-            {-.047,.040,.024,0},{-.016,.032,.022,.001},{.013,.025,.022,.001}},10,skin)
-        local tips={-.148,-.167,-.174,-.161}
-        for i=1,4 do
-            local x=(i-2.5)*.017*side
-            local tip=tips[i]
-            strand(mesh,{V(x,tip,-.029),V(x*1.03,tip+.016,-.022),
-                V(x*1.08,-.112,-.011),V(x,-.097,0)},.009,.010,skin,7)
-        end
-        strand(mesh,{V(side*.047,-.107,-.018),V(side*.047,-.091,-.012),
-            V(side*.040,-.068,-.006),V(side*.027,-.046,-.004)},.012,.011,skin,8)
+        classicBevel(mesh,0,-.072,-.010,.107,.168,.091,skin)
+        classicBevel(mesh,side*.043,-.061,-.033,.047,.091,.049,skin)
         if side==-1 and (look.accessory=="watch" or look.accessory=="wristband") then
-            loft(mesh,{{-.021,.032,.023},{-.017,.034,.027},{.001,.031,.026},{.004,.028,.022}},
-                9,dye(look.trim))
+            classicBevel(mesh,0,-.015,-.008,.114,.035,.102,dye(look.trim))
             if look.accessory=="watch" then
-                oval(mesh,0,-.009,-.025,.016,.017,.006,charcoal,9)
-                oval(mesh,0,-.009,-.030,.011,.011,.004,color(101,144,147),7)
+                classicBevel(mesh,0,-.013,-.064,.037,.036,.014,charcoal)
             end
         elseif side==-1 and look.accessory=="notebook" then
-            loft(mesh,{{-.154,.022,.007,-.041},{-.148,.048,.010,-.047},{-.021,.048,.010,-.047},
-                {-.015,.022,.007,-.041}},8,dye(look.trim))
-            loft(mesh,{{-.146,.037,.003,-.057},{-.139,.042,.004,-.057},{-.031,.042,.004,-.057},
-                {-.024,.037,.003,-.057}},8,chalk)
-            strand(mesh,{V(-.038,-.145,-.058),V(-.039,-.116,-.059),V(-.039,-.032,-.059)},
-                .003,.004,charcoal)
+            classicBevel(mesh,-.014,-.095,-.073,.113,.147,.025,dye(look.trim))
+            classicBevel(mesh,-.010,-.095,-.081,.090,.133,.013,chalk)
         end
     end)
 end
 
 function Human.shoe(look,side)
     local upper=dye(look.shoe)
-    local upperSeam=tone(look.shoe,.72)
-    local outsole=tone(look.shoe,.24,{14,13,12})
-    local midsole=tone(look.shoe,.49,{36,34,29})
+    local sole=tone(look.shoe,.30,{14,13,12})
+    local line=tone(look.shoe,.79)
     local boot=look.shoeStyle=="boot"
     local runner=look.shoeStyle=="runner"
-    local function last(x,y,z,s,c)
-        local width=c>0 and 1+c*.12 or 1+c*.25
-        return (x*width+side*.013*math.max(0,c)),y,z
-    end
+    local ground=-PolyLax.Character.rigDimensions.ankle*PolyLax.Character.campusScale
     return meshModel(function(mesh)
-        loft(mesh,{{-.099,.060,.116,-.053},{-.094,.065,.124,-.054},
-            {runner and -.078 or -.083,.066,.124,-.054},{-.073,.063,.122,-.054}},14,outsole,last)
-        loft(mesh,{{-.080,.065,.124,-.054},{-.070,.067,.125,-.054},
-            {-.053,.064,.122,-.055},{-.050,.061,.120,-.055}},14,midsole,last)
-        loft(mesh,{{-.064,.060,.117,-.056},{-.038,.061,.117,-.056},
-            {-.021,.058,.109,-.055},{.000,.054,.092,-.042},{.017,.047,.072,-.022},
-            {.032,.042,.060,-.012},{boot and .067 or .043,.039,.047,.001},
-            {boot and .073 or .047,.033,.041,.001}},14,upper,last)
-        local laces=boot and upperSeam or chalk
+        classicLoft(mesh,{{ground,.103,.164,-.069},{-.089,.113,.177,-.070},
+            {-.072,.110,.174,-.069},{runner and -.053 or -.062,.106,.169,-.068}},sole)
+        classicLoft(mesh,{{-.075,.108,.170,-.068},{-.028,.111,.164,-.062},
+            {.035,.091,.116,-.033},{boot and .095 or .063,.073,.087,.007}},upper)
         for i=0,2 do
-            local y,z=.015+i*.009,-.084+i*.017
-            local x=.027-i*.002
-            strand(mesh,{V(-x,y-.003,z+.005),V(0,y+.006,z),V(x,y-.001,z-.005)},.003,.0025,laces,5)
+            local y,z=.026+i*.013,-.156+i*.033
+            strand(mesh,{V(-.048,y,z),V(.048,y,z)},.005,.005,boot and line or chalk,5)
         end
-        local x=side*.056
-        strand(mesh,{V(x,-.043,-.127),V(x*1.08,-.032,-.077),
-            V(x*.90,-.009,-.035),V(x*.67,.014,.032)},.004,.004,upperSeam)
+        classicBevel(mesh,side*.069,.013,.041,.035,.038,.038,line)
     end)
 end
 
@@ -521,14 +330,13 @@ function Human.backpack(look)
     local tall=(style=="roll" or style=="travel" or style==2 or style==3) and 1 or 0
     local travel=style=="travel" or style==3
     return meshModel(function(mesh)
-        loft(mesh,{{-.250,.089,.044,.098},{-.237,.124,.066,.113},{-.210,.146,.086,.116},
-            {-.148,.152,.102,.127},{-.025,.152,.107,.127},{.086,.150,.105,.122},
-            {.153,.146,.094,.106},{.206,.135,.072,.091},{.248+tall*.026,.097,.048,.072},
-            {.268+tall*.031,.058,.031,.066}},14,base,function(x,y,z)
-                return x*(travel and 1.04 or 1),y,z+(travel and .010 or 0)
-            end,look.inks and look.inks.backpack)
-        loft(mesh,{{-.208,.054,.020,.187},{-.196,.094,.035,.195},{-.168,.113,.049,.202},
-            {-.119,.114,.052,.207},{-.084,.100,.047,.201},{-.057,.077,.033,.193}},12,trim)
+        local width=travel and .160 or .152
+        classicLoft(mesh,{{-.250,.091,.044,.098},{-.223,.143,.078,.111},
+            {-.152,width,.102,.126},{.146,width,.093,.107},
+            {.216,.136,.071,.094},{.265+tall*.025,.064,.036,.069}},
+            base,look.inks and look.inks.backpack)
+        classicLoft(mesh,{{-.208,.056,.020,.187},{-.189,.104,.037,.197},
+            {-.124,.114,.052,.207},{-.079,.103,.045,.199},{-.057,.077,.033,.193}},trim)
         strand(mesh,{V(-.095,-.099,.224),V(-.057,-.083,.244),V(0,-.077,.249),
             V(.055,-.084,.244),V(.096,-.099,.223)},.0035,.0037,zipper)
         strand(mesh,{V(.072,-.084,.241),V(.078,-.107,.245)},.005,.004,zipper)
@@ -539,12 +347,12 @@ function Human.backpack(look)
         strand(mesh,{V(-.047,.245,.050),V(-.050,.282,.053),V(-.027,.303,.054),
             V(.030,.303,.054),V(.050,.282,.054),V(.048,.245,.051)},.007,.007,trim)
         for _,side in ipairs(sides) do
-            strand(mesh,{V(side*.103,.224,.045),V(side*.111,.273,-.039),
-                V(side*.136,.244,-.122),V(side*.144,.154,-.187),V(side*.133,.060,-.202),
-                V(side*.128,-.048,-.181),V(side*.132,-.152,-.126),
-                V(side*.142,-.191,-.033),V(side*.123,-.217,.058)},.020,.011,trim,7)
-            strand(mesh,{V(side*.135,.144,-.196),V(side*.131,.104,-.211),
-                V(side*.128,.083,-.211)},.023,.013,zipper)
+            strand(mesh,{V(side*.103,.224,.045),V(side*.161,.289,-.070),
+                V(side*.202,.255,-.208),V(side*.205,.176,-.310),V(side*.187,.065,-.330),
+                V(side*.186,-.079,-.311),V(side*.199,-.166,-.227),
+                V(side*.186,-.205,-.078),V(side*.123,-.217,.058)},.020,.011,trim,6)
+            strand(mesh,{V(side*.201,.16,-.318),V(side*.195,.119,-.330),
+                V(side*.190,.102,-.333)},.023,.013,zipper)
         end
         if look.carriesStick then
             -- Lashing rings wrap the shaft center fitted to the pack mount in CampusCharacter.

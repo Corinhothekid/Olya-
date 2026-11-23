@@ -3,8 +3,8 @@ local helpers=(arg and arg[0] and arg[0]:match("^(.*[/])"))
     or os.getenv("POLYLAX_TEST_CHECKS") or "tests/"
 local project=(arg and arg[1]) or os.getenv("POLYLAX_TEST_PROJECT") or "PolyLax.codea"
 dofile(helpers.."craft_mock.lua")
-for _,tab in ipairs({"GoalPhysics","CampusPeople","CraftPalette","CampusHumanMeshes","CampusCharacter","CampusMotion",
-    "FreeRoamWorld","Character","AnimationController"}) do
+for _,tab in ipairs({"GoalPhysics","Character","CampusPeople","CraftPalette","CampusHumanMeshes","CampusCharacter",
+    "CampusMotion","FreeRoamWorld","AnimationController"}) do
     dofile(project.."/"..tab..".lua")
 end
 
@@ -15,13 +15,6 @@ local function campusPerson(id, room)
         if actor.id==id then return actor end
     end
     error("Missing campus character "..id)
-end
-
-local function faceFor(actor, room)
-    for _,part in ipairs(room.scene.entities) do
-        if part.parent==actor.head and part.model then return part end
-    end
-    error("Missing face mesh for "..actor.id)
 end
 
 local function checkMesh(model)
@@ -64,13 +57,46 @@ local function coversWaist(part,pelvis,height,width,depth)
 end
 
 local function checkCampusWaist(rig)
-    assert(coversWaist(rig.outfit,rig.pelvis,.020,.075,.042),"The top lifted off the campus waist")
-    assert(coversWaist(rig.waist,rig.pelvis,.020,.075,.042),"Campus trousers do not meet the hem")
+    assert(coversWaist(rig.outfit,rig.pelvis,.115,.075,.042),"The top lifted off the campus waist")
+    assert(coversWaist(rig.waist,rig.pelvis,.115,.075,.042),"Campus trousers do not meet the hem")
     assert(coversWaist(rig.waist,rig.pelvis,-.072,.068,.028),"The trouser seat pulled away from the legs")
 end
 
 local rooms={}
-local models={}
+local match=PolyLax.Character.new(craft.scene())
+local matchNeck
+for _,part in ipairs(match.scene.entities) do
+    if part.parent==match.body and part.material==match.materials.skin then matchNeck=part end
+end
+assert(matchNeck,"Main game has no neck model to compare")
+local function checkMainStyle(rig)
+    assert(rig.face.model==match.headShell.model,"Campus actor is missing the main-game head mesh")
+    assert(rig.neck.model==matchNeck.model,"Campus neck diverged from match play")
+    for i,part in ipairs(rig.faceParts) do
+        assert(part.model==match.faceParts[rig.faceIndex][i].model,"Campus face details diverged from match play")
+    end
+    assert(#rig.faceParts==3,"Campus actor lost nose, eye, or expression geometry")
+    local hair,beard=match.hairParts[rig.hairIndex],match.beardParts[rig.beardIndex]
+    assert(rig.hairPart.active==(hair~=nil) and (not hair or rig.hairPart.model==hair.model),
+        "Campus hair does not match the selected game model")
+    assert(rig.beardPart.active==(beard~=nil) and (not beard or rig.beardPart.model==beard.model),
+        "Campus beard does not match the selected game model")
+    for i,side in ipairs({"left","right"}) do
+        local shoulder=match.arms[side].shoulder.position*.74
+        local hip=match.legs[side].hip.position*.74
+        assert((rig.arms[i].position-shoulder):len()<1e-6,"Campus shoulder diverged from match proportions")
+        assert((rig.legs[i].position-hip):len()<1e-6,"Campus hip diverged from match proportions")
+    end
+end
+
+local function checkScaledGeometry(part,source)
+    local function key(v) return ("%.6f/%.6f/%.6f"):format(v.x,v.y,v.z) end
+    local points={}
+    for _,v in ipairs(part.model.positions) do points[key(v)]=true end
+    for _,v in ipairs(source.positions) do
+        assert(points[key(v*.74)],"Campus hoodie lost the main-game geometry")
+    end
+end
 for zone, ids in pairs({
     campus={"ethan","jace","maya","studentA","studentB","fieldAssistant"},school={"hallStaff"},
     coach={"coach"},drip={"drip"},training={"training"}
@@ -80,40 +106,22 @@ for zone, ids in pairs({
     assert(#room.actors==#ids)
     for _,id in ipairs(ids) do
         local actor=campusPerson(id,room)
-        local face=faceFor(actor,room)
-        assert(face.scale.x>.9 and face.scale.y>.9,"Invalid NPC head scale")
-        assert(face.model.positions and #face.model.positions>100)
+        local face=actor.rig.face
+        checkMainStyle(actor.rig)
+        assert(face.material.diffuse and not face.material.map,"Campus face should use the match material style")
         checkMesh(face.model)
         checkMesh(actor.rig.outfit.model)
         checkMesh(actor.rig.waist.model)
         checkCampusWaist(actor.rig)
         assert(actor.rig.legs[1].parent==actor.rig.pelvis and actor.rig.torso.parent==actor.rig.pelvis)
-        local function extent(part,axis)
-            local low,high=math.huge,-math.huge
-            for _,vertex in ipairs(part.model.positions) do
-                local value=vertex[axis]*part.scale[axis]
-                low,high=math.min(low,value),math.max(high,value)
-            end
-            return high-low
+        local skin=face.material.diffuse
+        for i,component in ipairs({"r","g","b"}) do
+            assert(skin[component]==actor.definition.skin[i],"Campus actor lost their authored complexion")
         end
-        assert(extent(face,"y")>.20 and extent(face,"y")<.40,"Oversized head")
-        assert(extent(actor.rig.outfit,"x")<.53,"Oversized torso")
-        assert(extent(actor.rig.forearms[1],"x")<.15,"Oversized forearm")
-        assert(extent(actor.rig.hands[1],"y")<.24,"Oversized hand")
-        local sharedTriangles={}
-        for _,index in ipairs(actor.rig.outfit.model.indices) do
-            sharedTriangles[index]=(sharedTriangles[index] or 0)+1
-        end
-        local smooth=false
-        for _,count in pairs(sharedTriangles) do if count>=6 then smooth=true end end
-        assert(smooth,"The torso is missing shared smooth-shaded vertices")
-        local swatches={}
-        for _,uv in ipairs(face.model.uvs) do swatches[uv.x..":"..uv.y]=true end
-        local distinct=0
-        for _ in pairs(swatches) do distinct=distinct+1 end
-        assert(face.material.map and distinct>=5,"Face material lost its distinguishing colors")
-        assert(not models[face.model],"NPCs share a face that should be distinct")
-        models[face.model]=true
+        local glasses=actor.rig.glasses
+        local earrings=actor.rig.earrings
+        assert((glasses and glasses.active==true or false)==(actor.definition.glasses==true))
+        assert((earrings and earrings.active==true or false)==(actor.definition.earrings==true))
         for i=1,2 do
             assert(actor.elbows[i].parent==actor.arms[i] and actor.knees[i].parent==actor.legs[i])
             assert(actor.rig.hands[i].model and actor.rig.hands[i].parent==actor.rig.wrists[i]
@@ -130,14 +138,15 @@ end
 
 local campus=rooms.campus
 local ethan=campusPerson("ethan",campus)
-local face=faceFor(ethan,campus)
-local ethanModel=face.model
+local ethanFaceIndex,ethanHairIndex=ethan.rig.faceIndex,ethan.rig.hairIndex
+local faceModel=ethan.rig.faceParts[1].model
 local again=World.new(craft.scene(),"campus")
-assert(faceFor(campusPerson("ethan",again),again).model==face.model,
+assert(campusPerson("ethan",again).rig.faceParts[1].model==faceModel,
     "Returning to a zone rebuilt the NPC face mesh")
 assert(campusPerson("maya",again).definition.name=="Maya Brooks")
 for _,id in ipairs({"maya","studentA","studentB","fieldAssistant"}) do
-    assert(campusPerson(id,again).rig.face.model==campusPerson(id,campus).rig.face.model,
+    local restored,original=campusPerson(id,again).rig,campusPerson(id,campus).rig
+    assert(restored.faceIndex==original.faceIndex and restored.hairIndex==original.hairIndex,
         "Reopening campus regenerated "..id)
 end
 local function checkValue(a,b)
@@ -161,21 +170,35 @@ end
 local mutable=People.named("ethan")
 mutable.skin[1]=0
 assert(People.named("ethan").skin[1]~=0)
-local player=People.player({FACE=4,HAIR=1,BEARD=6,BODY=4})
-assert(player.headShape=="long" and player.skin[1]==105 and player.haircut=="none")
+local savedAppearance={FACE=4,HAIR=4,BEARD=6,BODY=4}
+local player=People.player(savedAppearance)
+assert(player.skin[1]==105)
 assert(player.beardStyle==6 and player.height>1,"Campus avatar lost the saved athlete proportions")
+local wardrobe=People.named("ethan")
+player.shirt,player.trim,player.pants,player.shoe=wardrobe.shirt,wardrobe.trim,wardrobe.pants,wardrobe.shoe
+local playerRig=Character.new(craft.scene(),player)
+checkMainStyle(playerRig)
+checkScaledGeometry(playerRig.outfit,match.hoodieParts[1].model)
+checkScaledGeometry(playerRig.sleeves[1],PolyLax.Character.campusApparel("upperArm"))
+checkScaledGeometry(playerRig.forearms[1],PolyLax.Character.campusApparel("forearm"))
+assert(playerRig.faceIndex==4 and playerRig.hairIndex==4 and playerRig.beardIndex==6,
+    "Campus changed the player's saved match appearance")
+PolyLax.Character.apply(match,savedAppearance,"FACE")
+assert((playerRig.root.scale-match.proportions.scale):len()<1e-6,
+    "Campus changed the player's saved body proportions")
+local restoredLook=ethan.definition
 local entityCount=#campus.scene.entities
 local outfit,hand,shoe=ethan.rig.outfit.model,ethan.rig.hands[1].model,ethan.rig.feet[1].model
 local variation=People.named("ethan")
 variation.haircut,variation.headShape,variation.outfit,variation.accessory,variation.shoeStyle=
     "braids","angular","jacket","notebook","boot"
 Character.apply(ethan.rig,variation)
-assert(face.model~=ethanModel and ethan.rig.outfit.model~=outfit
+assert(ethan.rig.faceIndex~=ethanFaceIndex and ethan.rig.hairIndex~=ethanHairIndex and ethan.rig.outfit.model~=outfit
     and ethan.rig.hands[1].model~=hand and ethan.rig.feet[1].model~=shoe)
 checkMesh(ethan.rig.hands[1].model)
 checkMesh(ethan.rig.feet[1].model)
-Character.apply(ethan.rig,ethan.definition)
-assert(face.model==ethanModel and #campus.scene.entities==entityCount)
+Character.apply(ethan.rig,restoredLook)
+assert(ethan.rig.faceParts[1].model==faceModel and #campus.scene.entities==entityCount)
 local x,z=ethan.x,ethan.z
 local playerX,playerZ=x-2,z+.2
 for _=1,24 do World.update(campus,.08,"morning",playerX,playerZ) end
@@ -206,7 +229,6 @@ for _=1,15 do
     checkCampusWaist(easy.rig)
 end
 
-local match=PolyLax.Character.new(craft.scene())
 local shirt,shorts
 for _,part in ipairs(match.scene.entities) do
     if part.parent==match.body and part.material==match.materials.jersey then shirt=part end

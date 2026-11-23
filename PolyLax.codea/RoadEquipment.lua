@@ -619,7 +619,8 @@ local function casualTextureGear(r,ops)
                 r.casualGloves[i]=glove
             end
             local size=gloveSizes[ops.gloveModel]
-            glove.scale=V(.53*size,.59,.48*size)
+            local scale=P.Character.campusScale
+            glove.scale=V(scale*size,scale,scale*size)
             resolvedSurface(glove,P.Character.gloveModel(),nil,gloves,"glove")
             glove.active=true
         elseif r.casualGloves then
@@ -633,7 +634,7 @@ local function equipStowed(r,ops,kind)
     P.Character.setStickType(r,kind or r.stickType)
     stick(r,ops)
     -- The long shaft shifts upward along the same two attachment loops.
-    local rise=r.stickType=="long" and .127 or 0
+    local rise=r.stickType=="long" and .127*P.Character.campusScale or 0
     r.backpackStick.position=V(.166+rise*math.tan(math.rad(6)),.040+rise,.128)
 end
 
@@ -651,6 +652,8 @@ function Equipment.newCasual(scene,profile,kit,stickType)
     P.Character.addEquipmentStick(r)
     r.backpackStick=entity(r,r.backpack)
     r.backpackStick.eulerAngles=V(0,0,-6)
+    local scale=P.Character.campusScale
+    r.backpackStick.scale=V(scale,scale,scale)
     r.stickRoot.parent=r.backpackStick
     r.stickRoot.position,r.stickRoot.eulerAngles=V(0,0,0),V(0,0,0)
     casualTextureGear(r,ops)
