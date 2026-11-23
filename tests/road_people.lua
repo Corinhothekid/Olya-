@@ -3,7 +3,7 @@ local helpers=(arg and arg[0] and arg[0]:match("^(.*[/])"))
     or os.getenv("POLYLAX_TEST_CHECKS") or "tests/"
 local project=(arg and arg[1]) or os.getenv("POLYLAX_TEST_PROJECT") or "PolyLax.codea"
 dofile(helpers.."craft_mock.lua")
-for _,tab in ipairs({"GoalPhysics","CampusPeople","CampusHumanMeshes","CampusCharacter","CampusMotion",
+for _,tab in ipairs({"GoalPhysics","CampusPeople","CraftPalette","CampusHumanMeshes","CampusCharacter","CampusMotion",
     "FreeRoamWorld","Character","AnimationController"}) do
     dofile(project.."/"..tab..".lua")
 end
@@ -107,13 +107,11 @@ for zone, ids in pairs({
         local smooth=false
         for _,count in pairs(sharedTriangles) do if count>=6 then smooth=true end end
         assert(smooth,"The torso is missing shared smooth-shaded vertices")
-        local colors={}
-        for _,ink in ipairs(face.model.colors) do
-            colors[("%d-%d-%d"):format(math.floor(ink.r),math.floor(ink.g),math.floor(ink.b))]=true
-        end
+        local swatches={}
+        for _,uv in ipairs(face.model.uvs) do swatches[uv.x..":"..uv.y]=true end
         local distinct=0
-        for _ in pairs(colors) do distinct=distinct+1 end
-        assert(distinct>=5,"Face geometry lost its distinguishing features")
+        for _ in pairs(swatches) do distinct=distinct+1 end
+        assert(face.material.map and distinct>=5,"Face material lost its distinguishing colors")
         assert(not models[face.model],"NPCs share a face that should be distinct")
         models[face.model]=true
         for i=1,2 do

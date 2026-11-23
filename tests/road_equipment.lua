@@ -6,7 +6,7 @@ local loaded=io.open(helpers.."craft_mock.lua")
 if not loaded then helpers="PolyLax-3.3-Checks/" else loaded:close() end
 dofile(helpers.."craft_mock.lua")
 for _,tab in ipairs({"TeamUniform","Profile","Character","AnimationController","CameraController","UI",
-    "Style","CampusPeople","CampusHumanMeshes","CampusCharacter","CampusMotion","RoadEquipment","RoadEquipmentUI"}) do
+    "Style","CampusPeople","CraftPalette","CampusHumanMeshes","CampusCharacter","CampusMotion","RoadEquipment","RoadEquipmentUI"}) do
     dofile(project.."/"..tab..".lua")
 end
 
@@ -64,10 +64,10 @@ for _,entry in ipairs({{"hoodiePattern",2,"hoodie",rig.outfit},
     assert(part.model~=plainModel and rig.definition.patternKeys[key],
         "Pattern does not follow the clothing mesh for "..field)
     local shades={}
-    for _,ink in ipairs(part.model.colors) do shades[math.floor(ink.r)..":"..math.floor(ink.g)]=true end
+    for _,uv in ipairs(part.model.uvs) do shades[uv.x..":"..uv.y]=true end
     local colorCount=0
     for _ in pairs(shades) do colorCount=colorCount+1 end
-    assert(colorCount>=3,"Pattern colors are missing from "..field)
+    assert(part.material.map and colorCount>=3,"Pattern material is missing colors for "..field)
 end
 local before=stick.worldPosition
 rig.root.position=vec3(2,0,-2)

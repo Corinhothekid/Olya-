@@ -6,7 +6,7 @@ local mock=io.open(checks.."craft_mock.lua")
 if mock then mock:close() else checks="PolyLax-3.3-Checks/" end
 dofile(checks.."craft_mock.lua")
 for _,tab in ipairs({"TeamUniform","Profile","Character","AnimationController","CameraController","UI",
-    "Style","CampusPeople","CampusHumanMeshes","CampusCharacter","CampusMotion","EquipmentTextures",
+    "Style","CampusPeople","CraftPalette","CampusHumanMeshes","CampusCharacter","CampusMotion","EquipmentTextures",
     "RoadEquipment","RoadEquipmentUI"}) do
     dofile(project.."/"..tab..".lua")
 end

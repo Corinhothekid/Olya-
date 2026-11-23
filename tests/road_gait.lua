@@ -3,7 +3,7 @@ local checks = os.getenv("POLYLAX_TEST_CHECKS")
     or (arg and arg[0] and arg[0]:match("^(.*[/])")) or "tests/"
 local project = (arg and arg[1]) or os.getenv("POLYLAX_TEST_PROJECT") or "PolyLax.codea"
 dofile(checks .. "/craft_mock.lua")
-for _, tab in ipairs({"CampusPeople", "CampusHumanMeshes", "CampusCharacter", "CampusMotion"}) do
+for _, tab in ipairs({"CampusPeople", "CraftPalette","CampusHumanMeshes", "CampusCharacter", "CampusMotion"}) do
     dofile(project .. "/" .. tab .. ".lua")
 end
 

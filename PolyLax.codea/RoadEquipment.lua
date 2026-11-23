@@ -289,7 +289,8 @@ end
 local meshCache, meshCount = {}, 0
 local function mesh(shape,pattern,swatch)
     local signature=shape..":"..pattern..":"..swatch
-    if meshCache[signature] then return meshCache[signature] end
+    local cached=meshCache[signature]
+    if cached then return cached[1],cached[2] end
     local record=patterns[pattern] or {}
     local base=swatches[swatch][2]
     local colors={}
@@ -333,24 +334,27 @@ local function mesh(shape,pattern,swatch)
             end
         end
     end
-    local model=craft.model()
-    model.positions,model.normals,model.colors,model.indices,model.uvs=positions,normals,vertexColors,indices,uvs
+    local model,paint=P.CraftPalette.build({positions=positions,normals=normals,colors=vertexColors,
+        indices=indices,uvs=uvs})
     if meshCount>=48 then meshCache,meshCount={},0 end
-    meshCache[signature],meshCount=model,meshCount+1
-    return model
+    meshCache[signature],meshCount={model,paint},meshCount+1
+    return model,paint
 end
 
-local function patch(r,parent,shared,x,y,z,w,h,d,reverse)
+local function patch(r,parent,x,y,z,w,h,d)
     local e=entity(r,parent,x,y,z)
-    e.material,e.scale=shared,V(w,h,d or 1)
-    if reverse then e.eulerAngles=V(0,180,0) end
+    e.scale=V(w,h,d or 1)
     e.active=false
     return e
 end
 
 local function coat(e,shape,pattern,shade,visible)
     e.active=visible and pattern>1 and patterns[pattern]~=nil
-    if e.active then e.model=mesh(shape,pattern,shade) end
+    if e.active then
+        local model,paint=mesh(shape,pattern,shade)
+        e.model=model
+        e.material=paint
+    end
 end
 
 local function mapOf(key,roughness,metalness,environment)
@@ -375,11 +379,10 @@ local shaftBounds={short={-.923,.419,-.37,0},long={-1.36,.879,-.48,.46},
 local function buildStick(r)
     if r.roadStick then return r.roadStick end
     local root=r.stickRoot
-    local base=material(white)
-    local s={coat=base,finish=material(black),top=material(white),side=material(black),shoot=material(white)}
-    s.upper,s.lower=patch(r,root,base,0,0,0,1,1,1),patch(r,root,base,0,0,0,1,1,1)
-    s.center=patch(r,root,base,0,0,0,1,1,1)
-    s.grip=patch(r,root,base,0,0,0,1,1,1)
+    local s={finish=material(black),top=material(white),side=material(black),shoot=material(white)}
+    s.upper,s.lower=patch(r,root,0,0,0,1,1,1),patch(r,root,0,0,0,1,1,1)
+    s.center=patch(r,root,0,0,0,1,1,1)
+    s.grip=patch(r,root,0,0,0,1,1,1)
     s.strings=entity(r,root)
     s.goalieStrings=entity(r,root)
     local function strings(parent,goalie)
@@ -402,12 +405,12 @@ end
 
 local stickFinishes={{.27,.52},{.75,.18},{.14,.67}}
 
-local function coatShaft(e,base,map,pattern,shade,radius,lo,hi)
+local function coatShaft(e,map,pattern,shade,radius,lo,hi)
     local length=hi-lo
     e.position,e.scale=V(0,(lo+hi)*.5,0),V(radius,length,radius)
-    e.material=map or base
     if map then
         e.model=P.EquipmentTextures.shaft(math.max(1,math.floor(length/.19+.5)))
+        e.material=map
         e.active=true
     else
         coat(e,"tube",pattern,shade,true)
@@ -428,11 +431,11 @@ local function stick(r,opts)
     s.top.diffuse,s.side.diffuse,s.shoot.diffuse=tint(opts.topStringColor),tint(opts.sidewallColor),tint(opts.shootingStringColor)
     local shaftMap=mapOf(imported(opts.shaftPattern),surface[1])
     local shaftRadius=.031*radius
-    coatShaft(s.upper,s.coat,shaftMap,opts.shaftPattern,opts.shaftColor,shaftRadius,.124,size[2]-.011)
-    coatShaft(s.lower,s.coat,shaftMap,opts.shaftPattern,opts.shaftColor,shaftRadius,size[1]+.172,size[3]-.109)
-    coatShaft(s.center,s.coat,shaftMap,1,opts.shaftColor,shaftRadius,size[3]+.070,-.074)
+    coatShaft(s.upper,shaftMap,opts.shaftPattern,opts.shaftColor,shaftRadius,.124,size[2]-.011)
+    coatShaft(s.lower,shaftMap,opts.shaftPattern,opts.shaftColor,shaftRadius,size[1]+.172,size[3]-.109)
+    coatShaft(s.center,shaftMap,1,opts.shaftColor,shaftRadius,size[3]+.070,-.074)
     local gripMap=mapOf(imported(opts.gripPattern))
-    coatShaft(s.grip,s.coat,gripMap,opts.gripPattern,opts.gripColor,gripMap and .036 or .034,-.0675,.1155)
+    coatShaft(s.grip,gripMap,opts.gripPattern,opts.gripColor,gripMap and .036 or .034,-.0675,.1155)
     local headScale=({1,.93,1.08})[opts.headModel]
     r.stickHead.scale,r.stickMesh.scale=V(headScale,1,1),V(headScale,1,1)
     if s.kind~=r.stickType then
@@ -460,8 +463,9 @@ function Equipment.textureTest(scene)
         local loaded,status=P.EquipmentTextures.status(key)
         local shaft
         if loaded then
-            shaft=patch(owner,root,P.EquipmentTextures.material(key),0,0,0,.10,1.50,.10)
+            shaft=patch(owner,root,0,0,0,.10,1.50,.10)
             shaft.model=P.EquipmentTextures.shaft(7)
+            shaft.material=P.EquipmentTextures.material(key)
             shaft.active=true
         end
         preview.shafts[i]={key=key,label=assetLabels[i],root=root,loaded=loaded,status=status,shaft=shaft}
@@ -480,11 +484,10 @@ local gloveSizes={1,.91,1.07}
 
 local function buildMatch(r)
     if r.roadMatch then return r.roadMatch end
-    local overlay=material(white)
     local m={gloves={},sleeves={},cuff=material(black,.42)}
     for _,side in ipairs(sides) do
         local wrist=r.joints[side.."Wrist"]
-        local pads=patch(r,wrist,overlay,0,.048,.130,.165,.163)
+        local pads=patch(r,wrist,0,.048,.130,.165,.163)
         local cuff=piece(r,wrist,m.cuff,0,.120,.099,.249,.05,.08)
         m.gloves[side]={pads=pads,cuff=cuff}
         local leg=r.legs[side]
@@ -492,8 +495,8 @@ local function buildMatch(r)
         local sleeve=r.sleeveParts[side]
         m.sleeves[side]={fabric=fabric,
             thighModel=sleeve[1].model,shinModel=sleeve[2].model,
-            thigh=patch(r,leg.hip,overlay,0,-.326,-.001,.137,.274,.141),
-            shin=patch(r,leg.knee,overlay,0,-.175,.002,.129,.441,.145)}
+            thigh=patch(r,leg.hip,0,-.326,-.001,.137,.274,.141),
+            shin=patch(r,leg.knee,0,-.175,.002,.129,.441,.145)}
         for _,part in ipairs(sleeve) do part.material=fabric end
     end
     r.roadMatch=m

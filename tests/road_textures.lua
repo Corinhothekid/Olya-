@@ -16,7 +16,7 @@ function readImage(ref)
     reads[key]=(reads[key] or 0)+1
     return images[key]
 end
-for _,tab in ipairs({"TeamUniform","Profile","Character","CampusPeople","CampusHumanMeshes",
+for _,tab in ipairs({"TeamUniform","Profile","Character","CampusPeople","CraftPalette","CampusHumanMeshes",
     "CampusCharacter","EquipmentTextures","RoadEquipment"}) do
     dofile(project.."/"..tab..".lua")
 end
@@ -112,6 +112,7 @@ assert(match.stickHead.material==match.materials.stick and not match.stickHead.m
 assert(match.arms.left.glove.material==match.materials.gloves and not match.roadStick.upper.active)
 
 local profile=P.Profile.load()
+local plain=E.newCasual(craft.scene(),profile,legacy,"long")
 local avatar=E.newCasual(craft.scene(),profile,kit,"long")
 hasMap(avatar.roadStick.upper,"camo")
 hasMap(avatar.stickHead,"galaxy")
@@ -126,7 +127,8 @@ assert(avatar.stickRoot.parent==avatar.backpackStick)
 local count=#avatar.scene.entities
 E.applyCasual(avatar,profile,legacy,"long")
 assert(avatar.hands[1].active and not avatar.casualGloves[1].active)
-assert(not avatar.thighs[1].material.map and not avatar.shins[2].material.map)
+assert(avatar.thighs[1].material==plain.thighs[1].material
+    and avatar.shins[2].material==plain.shins[2].material,"Imported sleeve did not restore the jogger palette")
 E.applyCasual(avatar,profile,kit,"long")
 hasMap(avatar.shins[2],"galaxy")
 assert(#avatar.scene.entities==count,"Repeated equip rebuilt the avatar")

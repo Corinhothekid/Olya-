@@ -24,10 +24,7 @@ local function meshModel(build)
     local mesh={positions={},normals={},indices={},colors={},uvs={}}
     build(mesh)
     for index, normal in ipairs(mesh.normals) do mesh.normals[index]=normal:normalize() end
-    local model=craft.model()
-    model.positions,model.normals,model.colors,model.indices,model.uvs=
-        mesh.positions,mesh.normals,mesh.colors,mesh.indices,mesh.uvs
-    return model
+    return PolyLax.CraftPalette.build(mesh)
 end
 
 local function vertex(mesh,p,ink,u,v)
