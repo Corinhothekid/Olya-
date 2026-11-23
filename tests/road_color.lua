@@ -26,7 +26,7 @@ function craft.material() return setmetatable({},materialMeta) end
 
 for _,tab in ipairs({"TeamUniform","Profile","Character","AnimationController","CameraController",
     "UI","Style","GoalPhysics","RoadEquipment","RoadEquipmentUI","CampusPeople",
-    "CampusCharacter","CampusMotion","FreeRoamWorld","FreeRoamUI","FreeRoam"}) do
+    "CampusHumanMeshes","CampusCharacter","CampusMotion","FreeRoamWorld","FreeRoamUI","FreeRoam"}) do
     dofile(project.."/"..tab..".lua")
 end
 
@@ -36,24 +36,23 @@ local appearance=P.Profile.load()
 local kit=Equipment.restore()
 local roam=P.FreeRoam.new({profile=appearance,equipment=kit,location={zone="campus"}})
 assert(roam.zone=="campus" and roam.rig.stickRoot.parent==roam.rig.backpackStick)
-local casual=roam.rig.roadCasual
-assert(casual.sneakers.diffuse.r==nil and casual.pack.diffuse.r==nil)
-
-local function expectTint(material,base,amount)
-    local expected={r=base[1]+(24-base[1])*amount,g=base[2]+(31-base[2])*amount,
-        b=base[3]+(42-base[3])*amount}
-    for key,channel in pairs(expected) do
-        assert(math.abs(diffuseWrites[material][key]-channel)<.001,"Equipment trim color changed")
+local casual=roam.rig
+assert(casual.outfit.material.diffuse.r==nil and casual.backpack.material.diffuse.r==nil)
+local function expectRGB(model,wanted)
+    for _,ink in ipairs(model.colors) do
+        if math.abs(ink.r-wanted[1])<1.1 and math.abs(ink.g-wanted[2])<1.1
+            and math.abs(ink.b-wanted[3])<1.1 then return end
     end
+    error("Equipment tint missing from mesh")
 end
-expectTint(casual.shoeTrim,{230,238,245},.78)
-expectTint(casual.packTrim,{40,53,67},.54)
+expectRGB(casual.feet[1].model,{230,238,245})
+expectRGB(casual.backpack.model,{40,53,67})
 local preview=assert(Equipment.change(kit,"buy","sneakerColor",4))
 preview=assert(Equipment.change(preview,"equip","sneakerColor",4))
 preview=Equipment.preview(preview,"backpackColor",8)
 P.FreeRoam.appearance(roam,appearance,preview)
-expectTint(casual.shoeTrim,{45,99,190},.78)
-expectTint(casual.packTrim,{101,218,228},.54)
+expectRGB(casual.feet[1].model,{45,99,190})
+expectRGB(casual.backpack.model,{101,218,228})
 
 local shop=Shop.new(craft.scene(),appearance,kit,"short")
 local function tap(id)
@@ -68,5 +67,5 @@ tap("VALUE_NEXT")
 assert(shop.rig.materials.gloves.metalness>.7)
 tap("OUTFIT")
 assert(shop.rig.stickRoot.parent==shop.rig.backpackStick)
-expectTint(shop.rig.roadCasual.shoeTrim,{230,238,245},.78)
+expectRGB(shop.rig.feet[1].model,{230,238,245})
 print("Road to Glory handles opaque Craft material readback in campus outfits and Drip Lab previews.")

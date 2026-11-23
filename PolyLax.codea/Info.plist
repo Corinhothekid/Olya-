@@ -56,6 +56,7 @@
 		<string>Story</string>
 		<string>RoadEquipmentUI</string>
 		<string>CampusPeople</string>
+		<string>CampusHumanMeshes</string>
 		<string>CampusCharacter</string>
 		<string>CampusMotion</string>
 		<string>FreeRoamWorld</string>

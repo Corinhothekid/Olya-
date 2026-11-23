@@ -8,11 +8,11 @@ local named = {
         faceWidth=.97,faceHeight=1.01,headShape="oval",skin={195,134,102},hair={86,47,33},haircut="sweep",
         shirt={40,102,91},trim={126,178,157},pants={48,67,86},shoe={230,232,221},outfit="hoodie",
         shoeStyle="court",accessory="watch",motion="easy"},
-    jace={name="Jace Holloway",role="athlete",height=1.07,width=1.13,frame="broad",
+    jace={name="Jace Holloway",role="athlete",height=1.06,width=1.04,frame="broad",
         faceWidth=1.04,faceHeight=.98,headShape="angular",skin={126,80,60},hair={26,23,24},haircut="crop",
         shirt={171,63,37},trim={237,218,172},pants={39,48,69},shoe={218,225,230},outfit="varsity",
         shoeStyle="runner",accessory="wristband",motion="athletic"},
-    coach={name="Coach Daniel Mercer",role="coach",height=1.05,width=1.11,frame="broad",
+    coach={name="Coach Daniel Mercer",role="coach",height=1.03,width=1.02,frame="broad",
         faceWidth=1.03,faceHeight=1.07,headShape="long",skin={200,148,111},hair={98,94,89},
         haircut="neat",beard=true,glasses=true,shirt={43,59,85},trim={150,166,179},pants={88,92,77},
         shoe={111,80,62},outfit="jacket",shoeStyle="boot",accessory="lanyard",motion="measured"},
@@ -64,6 +64,29 @@ local shoes={{216,222,219},{139,107,86},{205,219,191},{128,149,168}}
 local headShapes={"oval","angular","round","long"}
 local frames={"slim","athletic","broad"}
 local haircuts={"sweep","crop","neat","bun","bob","curls","braids"}
+
+local playerSkin={{247,208,174},{213,161,119},{168,110,77},{105,69,52}}
+local playerHair={{27,24,25},{27,24,25},{94,59,35},{190,140,69},{132,66,46},{52,39,33}}
+local playerHaircuts={"none","crop","sweep","neat","curls","bob"}
+local builds={{.96,.97,"slim"},{1,1,"athletic"},{1.025,1,"broad"},{.98,1.10,"athletic"}}
+
+local function choice(profile,key,default,length)
+    local value=tonumber(profile[key])
+    if value and value>=1 and value<=length and value%1==0 then return value end
+    return default
+end
+
+function People.player(profile)
+    profile=profile or {}
+    local face=choice(profile,"FACE",2,#playerSkin)
+    local haircut=choice(profile,"HAIR",3,#playerHaircuts)
+    local width,height,frame=table.unpack(builds[choice(profile,"BODY",2,#builds)])
+    local athlete=PolyLax.Athlete
+    return {id="player",role="athlete",width=width,height=athlete and athlete.heightScale(profile) or height,
+        frame=frame,headShape=headShapes[face],skin=copy(playerSkin[face]),hair=copy(playerHair[haircut]),
+        haircut=playerHaircuts[haircut],beardStyle=choice(profile,"BEARD",1,6),outfit="hoodie",motion="player"}
+end
+
 local roles={
     student={outfits={"hoodie","cardigan","varsity"},accessories={"pack","watch","notebook"},motion={"easy","animated","athletic"}},
     coach={outfits={"jacket","polo"},accessories={"lanyard","watch"},motion={"measured","athletic"}},

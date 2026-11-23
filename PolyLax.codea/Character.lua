@@ -791,6 +791,16 @@ local function makeStick(r)
     r.fieldStickHeadModel, r.fieldStickPocketModel = r.stickHead.model, r.stickMesh.model
 end
 
+-- A campus humanoid can carry the exact match stick without creating a second athlete.
+function Character.addEquipmentStick(rig)
+    rig.materials = {
+        shaft=material(silver,.25,.55), dark=material(dark),
+        stick=material(white,.56), mesh=material(color(204,212,209),.86)
+    }
+    rig.stickParts = {}
+    makeStick(rig)
+end
+
 -- Keep the upper grip at the stick origin. Move the pocket, head and mesh
 -- together so possessions and release points follow the visible equipment.
 function Character.setStickType(rig, kind)

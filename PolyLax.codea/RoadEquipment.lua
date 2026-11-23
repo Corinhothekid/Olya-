@@ -330,13 +330,6 @@ local function coat(e,shape,pattern,shade,visible)
     if e.active then e.model=mesh(shape,pattern,shade) end
 end
 
-local function band(r,parent,mat,x,y,z,rx,height,rz)
-    local e=patch(r,parent,mat,x,y,z,rx,height,rz)
-    e.model=mesh("tube",0,1)
-    e.active=true
-    return e
-end
-
 local function lineSegment(r,parent,mat,a,b,thickness)
     local mid=(a+b)*.5
     local e=piece(r,parent,mat,mid.x,mid.y,mid.z,thickness,(b-a):len(),thickness)
@@ -440,10 +433,6 @@ end
 function Equipment.applyMatch(r,kit)
     if not r then return end
     local ops=(kit or Equipment.restore()).equipped
-    if r.campus then P.Character.setCampusMode(r,false) end
-    if r.roadCasual then
-        for _,part in ipairs(r.roadCasual.parts) do part.active=false end
-    end
     stick(r,ops)
     local m=buildMatch(r)
     local finish=finishes[ops.gloveFinish]
@@ -477,104 +466,81 @@ function Equipment.applyMatch(r,kit)
     end
 end
 
-local function buildCasual(r)
-    if r.roadCasual then return r.roadCasual end
-    local c={parts={},legs={},hoodie=material(white),
-        joggers=material(black),sneakers=material(white),shoeTrim=material(black),
-        pack=material(black),packTrim=material(color(47,63,80)),plain=material(white)}
-    local function add(e) c.parts[#c.parts+1]=e return e end
-    c.chest=add(patch(r,r.body,c.plain,0,.555,-.242,.565,.385,1,true))
-    c.pantsWaist=add(piece(r,r.pelvis,c.joggers,0,-.006,0,.655,.216,.395))
-    c.packRoot=add(entity(r,r.body,0,.56,.247))
-    r.backpack=c.packRoot
-    c.packShell=piece(r,c.packRoot,c.pack,0,.008,.158,.575,.606,.31)
-    c.packCover=piece(r,c.packRoot,c.packTrim,0,.229,.262,.545,.186,.157)
-    c.packPocket=piece(r,c.packRoot,c.packTrim,0,-.127,.341,.426,.193,.102)
-    c.packPanel=patch(r,c.packRoot,c.plain,0,-.115,.394,.386,.159)
-    r.backpackStick=entity(r,c.packRoot,.345,.194,.169)
-    r.backpackStick.eulerAngles=V(0,0,-9)
-    for _,k in ipairs({-1,1}) do
-        lineSegment(r,c.packRoot,c.packTrim,V(k*.22,.312,.02),V(k*.263,.226,-.512),.056)
-        lineSegment(r,c.packRoot,c.packTrim,V(k*.263,.226,-.512),V(k*.246,-.229,-.510),.054)
-        lineSegment(r,c.packRoot,c.packTrim,V(k*.246,-.229,-.510),V(k*.22,-.286,.039),.053)
+-- Campus textiles shade the actual curved mesh. Match equipment keeps its own
+-- overlay geometry and dimensions for pads, gloves and the competition rig.
+local function fabric(pattern,shade)
+    local base=swatches[shade][2]
+    local record=patterns[pattern]
+    local colors={}
+    for i,rgb in ipairs(record.colors or {base}) do
+        colors[i]=blendRGB(rgb,base,.25)
     end
-    for _,y in ipairs({-.14,.12}) do
-        local tie=piece(r,c.packRoot,c.packTrim,.292,y,.167,.189,.068,.141)
-        tie.eulerAngles=V(0,0,8)
+    return function(u,v)
+        return colors[record.sample and record.sample(u,v) or 1]
     end
+end
+
+local function trim(rgb,amount)
+    return {rgb[1]+(blackRGB[1]-rgb[1])*amount,rgb[2]+(blackRGB[2]-rgb[2])*amount,
+        rgb[3]+(blackRGB[3]-rgb[3])*amount}
+end
+
+local function casualLook(profile,ops)
+    local look=P.CampusPeople.player(profile)
+    look.shirt,look.pants=swatches[ops.hoodieColor][2],swatches[ops.joggerColor][2]
+    look.shoe,look.pack=swatches[ops.sneakerColor][2],swatches[ops.backpackColor][2]
+    look.trim,look.packTrim=trim(look.shirt,.48),trim(look.pack,.54)
+    look.shoeStyle=({"court","boot","runner"})[ops.sneaker]
+    look.backpackStyle=({"campus","roll","travel"})[ops.backpackStyle]
+    look.carriesStick=true
+    look.inks,look.patternKeys={},{}
+    local function dye(part,pattern,shade)
+        look.inks[part]=fabric(pattern,shade)
+        look.patternKeys[part]=pattern..":"..shade
+    end
+    if ops.hoodiePattern>1 then dye("hoodie",ops.hoodiePattern,ops.hoodieColor) end
+    if ops.backpackPattern>1 then dye("backpack",ops.backpackPattern,ops.backpackColor) end
     for _,side in ipairs(sides) do
-        local hip,knee,ankle=r.legs[side].hip,r.legs[side].knee,r.legs[side].ankle
-        local wrist=r.joints[side.."Wrist"]
-        add(piece(r,wrist,r.materials.skin,0,-.034,0,.145,.145,.138))
-        add(piece(r,wrist,r.materials.skin,.051,-.031,-.064,.070,.088,.05))
-        local thigh=add(band(r,hip,c.joggers,0,-.238,0,.159,.507,.163))
-        local shin=add(band(r,knee,c.joggers,0,-.192,.002,.123,.455,.146))
-        local cuff=add(band(r,knee,c.packTrim,0,-.369,0,.124,.085,.147))
-        local shoe=add(piece(r,ankle,c.sneakers,0,-.047,-.109,.287,.161,.426))
-        local sole=add(piece(r,ankle,c.shoeTrim,0,-.116,-.108,.306,.046,.454))
-        local tongue=add(piece(r,ankle,c.sneakers,0,.022,-.046,.190,.130,.229))
-        local heel=add(piece(r,ankle,c.shoeTrim,0,-.039,.079,.24,.102,.043))
-        for i=0,2 do
-            local lace=add(piece(r,ankle,c.shoeTrim,0,.026+i*.013,-.182+i*.047,.139,.020,.017))
-            lace.eulerAngles=V(0,0,8-i*8)
+        local part=side=="left" and "Left" or "Right"
+        local style=ops[side.."Sleeve"]
+        local pattern,shade=ops[side.."SleevePattern"],ops[side.."SleeveColor"]
+        if style==3 then
+            dye("thigh"..part,pattern,shade)
+        elseif ops.joggerPattern>1 then
+            dye("thigh"..part,ops.joggerPattern,ops.joggerColor)
         end
-        local paintTop=add(patch(r,hip,c.plain,0,-.235,0,.163,.50,.167))
-        local paintBottom=add(patch(r,knee,c.plain,0,-.186,.002,.127,.444,.150))
-        local sleeveThigh=add(patch(r,hip,c.plain,0,-.302,0,.168,.380,.172))
-        local sleeveShin=add(patch(r,knee,c.plain,0,-.16,.002,.133,.43,.155))
-        c.legs[side]={thigh=thigh,shin=shin,cuff=cuff,shoe=shoe,sole=sole,tongue=tongue,heel=heel,
-            paintTop=paintTop,paintBottom=paintBottom,sleeveThigh=sleeveThigh,sleeveShin=sleeveShin}
+        if style>=2 then
+            dye("shin"..part,pattern,shade)
+        elseif ops.joggerPattern>1 then
+            dye("shin"..part,ops.joggerPattern,ops.joggerColor)
+        end
     end
-    r.roadCasual=c
-    return c
+    return look
+end
+
+local function equipStowed(r,ops,kind)
+    P.Character.setStickType(r,kind or r.stickType)
+    stick(r,ops)
+    -- The long shaft shifts upward along the same two attachment loops.
+    local rise=r.stickType=="long" and .127 or 0
+    r.backpackStick.position=V(.166+rise*math.tan(math.rad(6)),.040+rise,.128)
 end
 
 function Equipment.applyCasual(r,profile,kit,stickType)
-    P.Character.apply(r,profile)
-    P.Character.setStickType(r,stickType or r.stickType)
-    P.Character.setCampusMode(r,true)
-    local c=buildCasual(r)
     local ops=(kit or Equipment.restore()).equipped
-    for _,part in ipairs(c.parts) do part.active=true end
-    if r.roadMatch then
-        for _,side in ipairs(sides) do
-            local glove,wrap=r.roadMatch.gloves[side],r.roadMatch.sleeves[side]
-            glove.pads.active,glove.cuff.active,wrap.thigh.active,wrap.shin.active=false,false,false,false
-        end
-    end
-    local hoodieRGB=swatches[ops.hoodieColor][2]
-    local sneakerRGB=swatches[ops.sneakerColor][2]
-    local packRGB=swatches[ops.backpackColor][2]
-    r.materials.hoodie.diffuse=colorFromRGB(hoodieRGB)
-    r.materials.hoodTrim.diffuse=blendRGB(hoodieRGB,blackRGB,.48)
-    c.sneakers.diffuse,c.joggers.diffuse=colorFromRGB(sneakerRGB),tint(ops.joggerColor)
-    c.shoeTrim.diffuse=blendRGB(sneakerRGB,blackRGB,.78)
-    c.pack.diffuse=colorFromRGB(packRGB)
-    c.packTrim.diffuse=blendRGB(packRGB,blackRGB,.54)
-    local packShape=({{.575,.606,.31},{.505,.704,.263},{.611,.707,.34}})[ops.backpackStyle]
-    c.packShell.scale=V(packShape[1],packShape[2],packShape[3])
-    c.packCover.position=V(0,packShape[2]*.38,.262)
-    coat(c.chest,"panel",ops.hoodiePattern,ops.hoodieColor,true)
-    coat(c.packPanel,"panel",ops.backpackPattern,ops.backpackColor,true)
-    for _,side in ipairs(sides) do
-        local leg=c.legs[side]
-        local style=ops[side.."Sleeve"]
-        local pattern,shade=ops[side.."SleevePattern"],ops[side.."SleeveColor"]
-        coat(leg.paintTop,"tube",ops.joggerPattern,ops.joggerColor,style~=3)
-        coat(leg.paintBottom,"tube",ops.joggerPattern,ops.joggerColor,style==1)
-        leg.sleeveThigh.active,leg.sleeveShin.active=style==3,style>=2
-        if leg.sleeveThigh.active then leg.sleeveThigh.model=mesh("tube",pattern,shade) end
-        if leg.sleeveShin.active then leg.sleeveShin.model=mesh("tube",pattern,shade) end
-        leg.tongue.scale=ops.sneaker==2 and V(.211,.203,.225) or V(.19,.13,.229)
-        leg.sole.scale=ops.sneaker==3 and V(.319,.062,.465) or V(.306,.046,.454)
-    end
-    stick(r,ops)
-    r.stickRoot.parent=r.backpackStick
-    r.stickRoot.position,r.stickRoot.eulerAngles=V(0,0,0),V(0,0,0)
+    P.CampusCharacter.apply(r,casualLook(profile,ops))
+    equipStowed(r,ops,stickType)
 end
 
 function Equipment.newCasual(scene,profile,kit,stickType)
-    local rig=P.Character.new(scene)
-    Equipment.applyCasual(rig,profile,kit,stickType)
-    return rig
+    local ops=(kit or Equipment.restore()).equipped
+    local r=P.CampusCharacter.new(scene,casualLook(profile,ops))
+    r.campus=true
+    P.Character.addEquipmentStick(r)
+    r.backpackStick=entity(r,r.backpack)
+    r.backpackStick.eulerAngles=V(0,0,-6)
+    r.stickRoot.parent=r.backpackStick
+    r.stickRoot.position,r.stickRoot.eulerAngles=V(0,0,0),V(0,0,0)
+    equipStowed(r,ops,stickType)
+    return r
 end

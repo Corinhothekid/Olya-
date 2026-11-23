@@ -92,7 +92,7 @@ local function poseCamera(roam, dt)
 end
 
 local function place(roam)
-    roam.rig.root.position = vec3(roam.x,0,roam.z)
+    roam.rig.root.position = vec3(roam.x,roam.animation.bob,roam.z)
     roam.rig.root.eulerAngles = vec3(0,roam.yaw,0)
 end
 
@@ -113,10 +113,8 @@ local function openZone(roam, location)
     roam.camera = P.CameraController.new(scene,fov)
     roam.camera.fieldOfView = fov
     roam.rig = P.RoadEquipment.newCasual(scene,roam.profile,roam.equipment,roam.stickType)
+    roam.animation = P.CampusMotion.new(roam.rig,"player",0)
     place(roam)
-    roam.animation = P.AnimationController.new(roam.rig)
-    P.AnimationController.update(roam.animation,0,{speed=0})
-    if P.RoadEquipment.stow then P.RoadEquipment.stow(roam.rig) end
     poseCamera(roam,0)
     roam.point = world.interaction(roam.world,x,z)
 end
@@ -138,7 +136,6 @@ function FreeRoam.appearance(roam, profile, equipment, stickType)
     roam.profile, roam.equipment = profile or roam.profile, equipment or roam.equipment
     roam.stickType = stickType or roam.stickType
     P.RoadEquipment.applyCasual(roam.rig,roam.profile,roam.equipment,roam.stickType)
-    if P.RoadEquipment.stow then P.RoadEquipment.stow(roam.rig) end
 end
 
 function FreeRoam.speak(roam, dialogue, actorId)
@@ -190,7 +187,6 @@ local function movement(roam, dt)
     if speed > .035 then
         turn = angleDifference(math.deg(atan2(-dx,-dz)),roam.yaw)
         roam.yaw = (roam.yaw+turn*ease(10,dt))%360
-        place(roam)
     end
     return speed,math.max(-1,math.min(1,turn/95))
 end
@@ -224,8 +220,9 @@ function FreeRoam.update(roam, dt)
     if P.FreeRoamWorld.update and not roam.paused then
         P.FreeRoamWorld.update(roam.world,dt,roam.timeOfDay,roam.x,roam.z,roam.dialogueActor)
     end
-    P.AnimationController.update(roam.animation,dt,{speed=speed,turn=turn})
-    if P.RoadEquipment.stow then P.RoadEquipment.stow(roam.rig) end
+    local mode=speed>.04 and "walk" or roam.dialogue and "listen" or "idle"
+    P.CampusMotion.update(roam.animation,dt,mode,speed,turn)
+    place(roam)
     poseCamera(roam,dt)
     roam.noticeTime = math.max(0,roam.noticeTime-dt)
     return dt

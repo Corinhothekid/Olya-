@@ -29,11 +29,20 @@ local function refresh(view)
         local style=side.."Sleeve"
         if selected[1]~=style and preview.equipped[style]==1 then preview.equipped[style]=3 end
     end
-    local rig=view.rig
     if view.section>=4 then
-        equipment.applyCasual(rig,view.profile,preview,view.stickType)
+        if not view.casualRig then
+            view.casualRig=equipment.newCasual(view.scene,view.profile,preview,view.stickType)
+            view.casualMotion=P.CampusMotion.new(view.casualRig,"player",0)
+        else
+            equipment.applyCasual(view.casualRig,view.profile,preview,view.stickType)
+        end
+        view.matchRig.root.active,view.casualRig.root.active=false,true
+        view.rig=view.casualRig
     else
-        P.Character.setCampusMode(rig,false)
+        local rig=view.matchRig
+        if view.casualRig then view.casualRig.root.active=false end
+        rig.root.active=true
+        view.rig=rig
         P.Character.apply(rig,view.profile)
         P.Character.setStickType(rig,view.stickType)
         equipment.applyMatch(rig,preview)
@@ -46,7 +55,7 @@ function Shop.new(scene,profile,kit,stickType,onSave)
         onSave=onSave,section=1,field=1,preset=1,elapsed=0,heading=-14,goalHeading=-14
     }
     view.choice=view.kit.equipped.shaftPattern
-    view.rig=P.Character.new(scene)
+    view.matchRig=P.Character.new(scene)
     view.camera=P.CameraController.new(scene,38)
     view.camera.lens.farPlane=45
     local stage=scene:entity()
@@ -56,7 +65,7 @@ function Shop.new(scene,profile,kit,stickType,onSave)
     stage.material.diffuse=color(50,76,79)
     stage.position,stage.scale=vec3(0,-.086,0),vec3(3.4,.16,3.3)
     refresh(view)
-    view.animation=P.AnimationController.new(view.rig)
+    view.animation=P.AnimationController.new(view.matchRig)
     return view
 end
 
@@ -144,9 +153,17 @@ local function renderPreview(view,L,dt)
     local rig=view.rig
     view.heading=view.heading+(view.goalHeading-view.heading)*(1-math.exp(-dt*15))
     rig.root.eulerAngles=vec3(0,view.heading,0)
-    P.AnimationController.update(view.animation,dt,{speed=0})
-    local height=rig.proportions.scale.y
+    local height
+    if rig.campus then
+        P.CampusMotion.update(view.casualMotion,dt,"idle",0)
+        rig.root.position=vec3(0,view.casualMotion.bob,0)
+        height=rig.root.scale.y
+    else
+        P.AnimationController.update(view.animation,dt,{speed=0})
+        height=rig.proportions.scale.y
+    end
     local equipmentY,objectSpan,radius=1.45*height,3.12*height,1.45
+    if rig.campus then equipmentY,objectSpan,radius=1.22*height,2.62*height,.84 end
     if view.section==2 then equipmentY,objectSpan,radius=1.57*height,1.56*height,1.02 end
     if view.section==3 then equipmentY,objectSpan,radius=.58*height,1.29*height,.73 end
     local t=view.camera.tanHalf

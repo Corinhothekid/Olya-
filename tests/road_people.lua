@@ -3,7 +3,7 @@ local helpers=(arg and arg[0] and arg[0]:match("^(.*[/])"))
     or os.getenv("POLYLAX_TEST_CHECKS") or "tests/"
 local project=(arg and arg[1]) or os.getenv("POLYLAX_TEST_PROJECT") or "PolyLax.codea"
 dofile(helpers.."craft_mock.lua")
-for _,tab in ipairs({"GoalPhysics","CampusPeople","CampusCharacter","CampusMotion","FreeRoamWorld"}) do
+for _,tab in ipairs({"GoalPhysics","CampusPeople","CampusHumanMeshes","CampusCharacter","CampusMotion","FreeRoamWorld"}) do
     dofile(project.."/"..tab..".lua")
 end
 
@@ -50,6 +50,26 @@ for zone, ids in pairs({
         assert(face.model.positions and #face.model.positions>100)
         checkMesh(face.model)
         checkMesh(actor.rig.outfit.model)
+        assert(actor.rig.legs[1].parent==actor.rig.pelvis and actor.rig.torso.parent==actor.rig.pelvis)
+        local function extent(part,axis)
+            local low,high=math.huge,-math.huge
+            for _,vertex in ipairs(part.model.positions) do
+                local value=vertex[axis]*part.scale[axis]
+                low,high=math.min(low,value),math.max(high,value)
+            end
+            return high-low
+        end
+        assert(extent(face,"y")>.20 and extent(face,"y")<.40,"Oversized head")
+        assert(extent(actor.rig.outfit,"x")<.53,"Oversized torso")
+        assert(extent(actor.rig.forearms[1],"x")<.15,"Oversized forearm")
+        assert(extent(actor.rig.hands[1],"y")<.24,"Oversized hand")
+        local sharedTriangles={}
+        for _,index in ipairs(actor.rig.outfit.model.indices) do
+            sharedTriangles[index]=(sharedTriangles[index] or 0)+1
+        end
+        local smooth=false
+        for _,count in pairs(sharedTriangles) do if count>=6 then smooth=true end end
+        assert(smooth,"The torso is missing shared smooth-shaded vertices")
         local colors={}
         for _,ink in ipairs(face.model.colors) do
             colors[("%d-%d-%d"):format(math.floor(ink.r),math.floor(ink.g),math.floor(ink.b))]=true
@@ -105,6 +125,9 @@ end
 local mutable=People.named("ethan")
 mutable.skin[1]=0
 assert(People.named("ethan").skin[1]~=0)
+local player=People.player({FACE=4,HAIR=1,BEARD=6,BODY=4})
+assert(player.headShape=="long" and player.skin[1]==105 and player.haircut=="none")
+assert(player.beardStyle==6 and player.height>1,"Campus avatar lost the saved athlete proportions")
 local entityCount=#campus.scene.entities
 local outfit,hand,shoe=ethan.rig.outfit.model,ethan.rig.hands[1].model,ethan.rig.feet[1].model
 local variation=People.named("ethan")
@@ -141,7 +164,7 @@ for _=1,10 do
     Motion.update(easy,.05,"walk",.7)
     Motion.update(measured,.05,"walk",.7)
 end
-assert(math.abs(easy.legs[1]-measured.legs[1])>2,"Named gait profiles produced the same stride")
+assert(math.abs(easy.stride-measured.stride)>.07,"Named gait profiles produced the same stride")
 local bent,moved=false,false
 for _=1,90 do
     World.update(campus,.08,"evening",x+8,z)
