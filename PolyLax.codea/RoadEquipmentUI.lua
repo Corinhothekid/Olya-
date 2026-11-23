@@ -84,10 +84,17 @@ function Shop.layout(view)
     local L={items={},byId={},width=width,mid=mid,top=top,bottom=bottom}
     L.topRow,L.tabsY=top-23,top-69
     local left,right=mid-width*.5,mid+width*.5
+    if view.textureTesting then
+        L.previewBottom,L.previewTop=bottom+100,top-55
+        L.editorTop=L.previewBottom
+        add(L,"TEXTURE_BACK","Back",left+33,L.topRow,66,38)
+        return L
+    end
     L.editorTop=bottom+176
     L.previewBottom,L.previewTop=L.editorTop+4,L.tabsY-22
     L.fieldY,L.valueY,L.actionY=bottom+134,bottom+84,bottom+25
     add(L,"BACK","Exit",left+33,L.topRow,66,38)
+    add(L,"TEXTURE_TEST","Texture Test",right-48,L.topRow,96,38)
     local sections=P.RoadEquipment.sections
     local step=width/#sections
     for number,tab in ipairs(sections) do
@@ -109,6 +116,8 @@ function Shop.layout(view)
         L.fieldLabel=selected[2]
         L.fieldCount=view.field.." / "..count
         L.valueLabel=selected[3][view.choice]
+        local textureReady=P.RoadEquipment.patternStatus(id,view.choice)
+        L.valueUnavailable=textureReady==false
         add(L,"FIELD_PREV","‹",left+23,L.fieldY,46,42)
         add(L,"FIELD_NEXT","›",right-23,L.fieldY,46,42)
         add(L,"VALUE_PREV","‹",left+23,L.valueY,46,42)
@@ -117,6 +126,8 @@ function Shop.layout(view)
             add(L,"EQUIP","Equipped",mid,L.actionY,width,44,false,false)
         elseif P.RoadEquipment.owns(view.kit,id,view.choice) then
             add(L,"EQUIP","Equip",mid,L.actionY,width,44,true)
+        elseif L.valueUnavailable then
+            add(L,"TEXTURE_UNAVAILABLE","Texture unavailable",mid,L.actionY,width,44,false,false)
         else
             add(L,"BUY","Buy • "..selected[5].." credits",mid,L.actionY,width,44,true,
                 view.kit.credits>=selected[5])
@@ -178,12 +189,65 @@ local function renderPreview(view,L,dt)
     view.scene:draw()
 end
 
+local function openTextureTest(view)
+    if not view.texturePreview then
+        local scene=craft.scene()
+        scene.ambientColor=color(170,180,198)
+        scene.sun.rotation=quat.eulerAngles(39,23,0)
+        local test=P.RoadEquipment.textureTest(scene)
+        test.scene=scene
+        test.camera=P.CameraController.new(scene,38)
+        test.heading,test.goalHeading=0,0
+        view.texturePreview=test
+    end
+    view.textureTesting=true
+    view.drag=nil
+end
+
+local function renderTextureTest(test,L,dt)
+    test.heading=test.heading+(test.goalHeading-test.heading)*(1-math.exp(-dt*15))
+    for _,shaft in ipairs(test.shafts) do shaft.root.eulerAngles=vec3(0,test.heading,0) end
+    local camera=test.camera
+    local t=camera.tanHalf
+    local h=L.previewTop-L.previewBottom
+    local distance=.15+math.max(test.radius/(t*L.width/HEIGHT*.91),test.height/(2*t*h/HEIGHT*.9))
+    local projection=HEIGHT/(2*distance*t)
+    local centerY=(L.previewTop+L.previewBottom)*.5
+    camera.entity.position=vec3((WIDTH*.5-L.mid)/projection,
+        (test.centerY or 0)+(HEIGHT*.5-centerY)/projection,-distance)
+    camera.entity.rotation=quat.lookRotation(vec3(0,0,1),vec3(0,1,0))
+    test.scene:update(dt)
+    test.scene:draw()
+end
+
+local textureErrors={
+    ["Missing asset"]="Missing",
+    ["Image load failed"]="Read failed",
+    ["Craft map rejected"]="Map rejected"
+}
+
+local function drawTextureLabels(test,L)
+    local labelWidth=L.width/#test.shafts-4
+    label("Texture Test",L.mid,L.topRow,21,colors.paper,L.width-145)
+    for _,shaft in ipairs(test.shafts) do
+        local screen=P.CameraController.project(test.camera,shaft.root.worldPosition)
+        if screen then
+            label("asset."..shaft.key,screen.x,L.bottom+67,12,colors.paper,labelWidth)
+            local status=shaft.loaded and "Loaded" or textureErrors[shaft.status] or "Unavailable"
+            label(status,screen.x,L.bottom+47,11,
+                shaft.loaded and colors.mint or colors.gold,labelWidth)
+        end
+    end
+    label("Drag to rotate all four shafts",L.mid,L.bottom+16,13,colors.subdued,L.width)
+end
+
 function Shop.draw(view,dt)
     dt=math.max(0,math.min(dt or 0,.05))
     local L=Shop.layout(view)
     view.elapsed=view.elapsed+dt
     if view.messageTime and view.elapsed>=view.messageTime then view.message=nil end
-    renderPreview(view,L,dt)
+    if view.textureTesting then renderTextureTest(view.texturePreview,L,dt)
+    else renderPreview(view,L,dt) end
     pushStyle()
     pushMatrix()
     resetMatrix()
@@ -197,15 +261,21 @@ function Shop.draw(view,dt)
     fill(colors.shadow)
     rect(0,0,WIDTH,L.editorTop)
     rect(0,L.previewTop,WIDTH,HEIGHT-L.previewTop)
-    local cx=L.mid
-    label("Drip Lab",cx,L.topRow,22,colors.paper,L.width-148)
-    label(tostring(view.kit.credits).." cr",cx+L.width*.5-35,L.topRow,15,colors.gold,69)
-    label("Drag preview to rotate",cx,L.previewBottom+14,12,colors.paper,L.width)
-    label(L.fieldLabel,cx,L.fieldY+6,17,colors.paper,L.width-106)
-    label(L.fieldCount,cx,L.fieldY-14,11,colors.subdued,55)
-    label(L.valueLabel,cx,L.valueY,16,colors.mint,L.width-108)
-    if view.message then
-        label(view.message,cx,L.bottom+55,12,colors.gold,L.width-10)
+    if view.textureTesting then
+        drawTextureLabels(view.texturePreview,L)
+    else
+        local cx=L.mid
+        label("Drip Lab",cx,L.topRow+7,20,colors.paper,L.width-202)
+        label(tostring(view.kit.credits).." cr",cx,L.topRow-12,13,colors.gold,82)
+        label("Drag preview to rotate",cx,L.previewBottom+14,12,colors.paper,L.width)
+        label(L.fieldLabel,cx,L.fieldY+6,17,colors.paper,L.width-106)
+        label(L.fieldCount,cx,L.fieldY-14,11,colors.subdued,55)
+        label(L.valueLabel,cx,L.valueY,16,L.valueUnavailable and colors.gold or colors.mint,L.width-108)
+        if L.valueUnavailable then
+            label("Texture unavailable on this device",cx,L.bottom+55,12,colors.gold,L.width-10)
+        elseif view.message then
+            label(view.message,cx,L.bottom+55,12,colors.gold,L.width-10)
+        end
     end
     for _,item in ipairs(L.items) do drawButton(item) end
     popMatrix()
@@ -238,6 +308,14 @@ local function commit(view,action)
 end
 
 local function handle(view,id)
+    if id=="TEXTURE_TEST" then
+        openTextureTest(view)
+        return
+    elseif id=="TEXTURE_BACK" then
+        view.textureTesting=false
+        view.drag=nil
+        return
+    end
     for number,tab in ipairs(P.RoadEquipment.sections) do
         if tab.id==id then
             view.section,view.field=number,1
@@ -281,7 +359,8 @@ function Shop.touch(view,touch)
         end
     elseif view.drag and view.drag.id==touch.id then
         if touch.state==MOVING then
-            view.goalHeading=view.goalHeading+(touch.x-view.drag.x)*.8
+            local rotating=view.textureTesting and view.texturePreview or view
+            rotating.goalHeading=rotating.goalHeading+(touch.x-view.drag.x)*.8
             view.drag.x=touch.x
         else
             view.drag=nil

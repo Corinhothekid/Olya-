@@ -86,22 +86,31 @@ local swatches = {
     {"Cobalt",{45,99,190}},{"Crimson",{166,47,62}},{"Sunset",{231,143,55}},
     {"Lavender",{143,112,214}},{"Ice",{101,218,228}},{"Rose",{226,138,168}}
 }
-local colorNames, patternNames = {}, {}
+local colorNames, patternNames, gearPatterns = {}, {}, {}
 for i,v in ipairs(swatches) do colorNames[i]=v[1] end
-for i,v in ipairs(patterns) do patternNames[i]=v.name end
+for i,v in ipairs(patterns) do patternNames[i],gearPatterns[i]=v.name,v.name end
+local assetKeys = {"camo","ducky","galaxy","zebra"}
+local assetLabels = {"Camo","Ducky","Galaxy","Zebra"}
+local assetPatterns = {"Solid"}
+for i,label in ipairs(assetLabels) do
+    assetPatterns[i+1] = "Imported "..label
+    gearPatterns[#patterns+i] = assetPatterns[i+1]
+end
 
 local sections = {
     {id="STICK",label="Stick",fields={
-        {"shaftPattern","Shaft Pattern",patternNames,1,35},
+        {"shaftPattern","Shaft Pattern",gearPatterns,1,35},
         {"shaftColor","Shaft Color",colorNames,4,12},
         {"shaftModel","Shaft Model",{"Alloy","Slim","Reinforced"},1,20},
         {"shaftFinish","Shaft Finish",{"Satin","Matte","Polished"},1,24},
         {"gripColor","Grip Tape",colorNames,1,8},
-        {"gripPattern","Grip Pattern",patternNames,1,18},
+        {"gripPattern","Grip Pattern",gearPatterns,1,18},
         {"headModel","Head Profile",{"Classic","Swept","Wide"},1,23},
         {"headColor","Head Color",colorNames,2,10},
+        {"headPattern","Head Pattern",assetPatterns,1,25},
         {"meshPattern","Mesh Weave",{"Diamond","Cross-Lace","Two-Tone"},1,18},
         {"meshColor","Mesh Color",colorNames,2,8},
+        {"pocketPattern","Pocket Pattern",assetPatterns,1,18},
         {"sidewallColor","Sidewall String",colorNames,1,8},
         {"topStringColor","Top String",colorNames,2,8},
         {"shootingStringColor","Shooting String",colorNames,2,8},
@@ -114,14 +123,14 @@ local sections = {
         {"gloveSecondary","Secondary Color",colorNames,1,9},
         {"gloveAccent","Accent Color",colorNames,3,9},
         {"gloveCuff","Cuff",{"Low","Flare","Shield"},1,20},
-        {"glovePattern","Glove Pattern",patternNames,1,32}
+        {"glovePattern","Glove Pattern",gearPatterns,1,32}
     }},
     {id="SLEEVES",label="Sleeves",fields={
         {"leftSleeve","Left Sleeve",{"None","Lower Leg","Full"},1,15},
-        {"leftSleevePattern","Left Pattern",patternNames,1,22},
+        {"leftSleevePattern","Left Pattern",gearPatterns,1,22},
         {"leftSleeveColor","Left Color",colorNames,1,9},
         {"rightSleeve","Right Sleeve",{"None","Lower Leg","Full"},1,15},
-        {"rightSleevePattern","Right Pattern",patternNames,1,22},
+        {"rightSleevePattern","Right Pattern",gearPatterns,1,22},
         {"rightSleeveColor","Right Color",colorNames,1,9}
     }},
     {id="OUTFIT",label="Outfit",fields={
@@ -144,6 +153,19 @@ for _,section in ipairs(sections) do
 end
 Equipment.fields = fields
 Equipment.maxCredits = 999999
+
+local function imported(option)
+    return assetKeys[option-#patterns]
+end
+
+function Equipment.patternStatus(id,choice)
+    local field = fields[id]
+    if not (field and type(choice)=="number") then return end
+    local key
+    if field[3]==gearPatterns then key=imported(choice)
+    elseif field[3]==assetPatterns then key=assetKeys[choice-1] end
+    if key then return P.EquipmentTextures.status(key) end
+end
 
 local function integer(value,default,min,max)
     if type(value)~="number" or value~=value or math.abs(value)==math.huge then return default end
@@ -205,6 +227,7 @@ function Equipment.change(kit,action,id,value)
     if not field or type(value)~="number" or not field[3][value] then return nil,"Choose an available option" end
     if action=="buy" then
         if Equipment.owns(nextKit,id,value) then return nil,"You already own this option" end
+        if Equipment.patternStatus(id,value)==false then return nil,"Pattern asset unavailable" end
         if nextKit.credits<field[5] then return nil,"More credits needed" end
         nextKit.owned[key(id,value)]=true
         nextKit.credits=nextKit.credits-field[5]
@@ -243,7 +266,7 @@ local black, white = colorFromRGB(blackRGB), color(246,248,247)
 
 local function entity(r,parent,x,y,z)
     local e=r.scene:entity()
-    e.parent=parent
+    if parent then e.parent=parent end
     e.position=V(x or 0,y or 0,z or 0)
     return e
 end
@@ -326,8 +349,17 @@ local function patch(r,parent,shared,x,y,z,w,h,d,reverse)
 end
 
 local function coat(e,shape,pattern,shade,visible)
-    e.active=visible and pattern>1
+    e.active=visible and pattern>1 and patterns[pattern]~=nil
     if e.active then e.model=mesh(shape,pattern,shade) end
+end
+
+local function mapOf(key,roughness,metalness,environment)
+    return key and P.EquipmentTextures.material(key,roughness,metalness,environment)
+end
+
+local function resolvedSurface(part,base,baseMaterial,map,projection)
+    part.model=map and P.EquipmentTextures.uvModel(base,projection) or base
+    part.material=map or baseMaterial
 end
 
 local function lineSegment(r,parent,mat,a,b,thickness)
@@ -342,10 +374,11 @@ local shaftBounds={short={-.923,.419,-.37,0},long={-1.36,.879,-.48,.46},
 
 local function buildStick(r)
     if r.roadStick then return r.roadStick end
-    local base=material(white)
     local root=r.stickRoot
-    local s={finish=material(black),top=material(white),side=material(black),shoot=material(white)}
+    local base=material(white)
+    local s={coat=base,finish=material(black),top=material(white),side=material(black),shoot=material(white)}
     s.upper,s.lower=patch(r,root,base,0,0,0,1,1,1),patch(r,root,base,0,0,0,1,1,1)
+    s.center=patch(r,root,base,0,0,0,1,1,1)
     s.grip=patch(r,root,base,0,0,0,1,1,1)
     s.strings=entity(r,root)
     s.goalieStrings=entity(r,root)
@@ -367,6 +400,20 @@ local function buildStick(r)
     return s
 end
 
+local stickFinishes={{.27,.52},{.75,.18},{.14,.67}}
+
+local function coatShaft(e,base,map,pattern,shade,radius,lo,hi)
+    local length=hi-lo
+    e.position,e.scale=V(0,(lo+hi)*.5,0),V(radius,length,radius)
+    e.material=map or base
+    if map then
+        e.model=P.EquipmentTextures.shaft(math.max(1,math.floor(length/.19+.5)))
+        e.active=true
+    else
+        coat(e,"tube",pattern,shade,true)
+    end
+end
+
 local function stick(r,opts)
     local s=buildStick(r)
     local size=shaftBounds[r.stickType] or shaftBounds.short
@@ -375,31 +422,51 @@ local function stick(r,opts)
     local radius=widths[opts.shaftModel]
     r.stickShaft.scale=V(radius,1,radius)
     r.stickShaft.material.diffuse=tint(opts.shaftColor)
-    local finish={{.27,.52},{.75,.18},{.14,.67}}
-    local surface=finish[opts.shaftFinish]
+    local surface=stickFinishes[opts.shaftFinish]
     r.stickShaft.material.roughness,r.stickShaft.material.metalness=surface[1],surface[2]
     s.finish.diffuse=tint(opts.gripColor)
     s.top.diffuse,s.side.diffuse,s.shoot.diffuse=tint(opts.topStringColor),tint(opts.sidewallColor),tint(opts.shootingStringColor)
-    local function paintShaft(e,lo,hi)
-        e.position,e.scale=V(0,(lo+hi)*.5,0),V(.031*radius,hi-lo,.031*radius)
-        coat(e,"tube",opts.shaftPattern,opts.shaftColor,true)
-    end
-    paintShaft(s.upper,.124,size[2]-.011)
-    paintShaft(s.lower,size[1]+.172,size[3]-.109)
-    s.grip.position,s.grip.scale=V(0,.024,0),V(.034,.183,.034)
-    coat(s.grip,"tube",opts.gripPattern,opts.gripColor,true)
+    local shaftMap=mapOf(imported(opts.shaftPattern),surface[1])
+    local shaftRadius=.031*radius
+    coatShaft(s.upper,s.coat,shaftMap,opts.shaftPattern,opts.shaftColor,shaftRadius,.124,size[2]-.011)
+    coatShaft(s.lower,s.coat,shaftMap,opts.shaftPattern,opts.shaftColor,shaftRadius,size[1]+.172,size[3]-.109)
+    coatShaft(s.center,s.coat,shaftMap,1,opts.shaftColor,shaftRadius,size[3]+.070,-.074)
+    local gripMap=mapOf(imported(opts.gripPattern))
+    coatShaft(s.grip,s.coat,gripMap,opts.gripPattern,opts.gripColor,gripMap and .036 or .034,-.0675,.1155)
     local headScale=({1,.93,1.08})[opts.headModel]
     r.stickHead.scale,r.stickMesh.scale=V(headScale,1,1),V(headScale,1,1)
-    r.stickHead.material.diffuse=tint(opts.headColor)
+    if s.kind~=r.stickType then
+        s.kind,s.headModel,s.pocketModel=r.stickType,r.stickHead.model,r.stickMesh.model
+    end
+    r.materials.stick.diffuse=tint(opts.headColor)
     local meshRGB=swatches[opts.meshColor][2]
-    r.stickMesh.material.diffuse=opts.meshPattern==3
+    r.materials.mesh.diffuse=opts.meshPattern==3
         and blendRGB(meshRGB,swatches[opts.shootingStringColor][2],.44) or colorFromRGB(meshRGB)
-    r.stickMesh.material.roughness=opts.meshPattern==2 and .68 or .91
+    r.materials.mesh.roughness=opts.meshPattern==2 and .68 or .91
+    resolvedSurface(r.stickHead,s.headModel,r.materials.stick,mapOf(assetKeys[opts.headPattern-1]),"face")
+    resolvedSurface(r.stickMesh,s.pocketModel,r.materials.mesh,mapOf(assetKeys[opts.pocketPattern-1]),"face")
     s.strings.active,s.goalieStrings.active=not goalie,goalie
     s.strings.position,s.strings.scale=V(0,size[4],0),V(headScale,1,1)
     s.goalieStrings.scale=V(headScale,1,1)
     local offset=opts.pocket==2 and .025 or opts.pocket==3 and -.05 or 0
     s.fieldLine.position,s.goalieLine.position=V(0,.8+offset,-.044),V(0,.8+offset,-.044)
+end
+
+function Equipment.textureTest(scene)
+    local preview={shafts={},radius=1.12,height=1.60,centerY=0}
+    for i,key in ipairs(assetKeys) do
+        local owner={scene=scene}
+        local root=entity(owner,nil,(i-2.5)*.65,0,0)
+        local loaded,status=P.EquipmentTextures.status(key)
+        local shaft
+        if loaded then
+            shaft=patch(owner,root,P.EquipmentTextures.material(key),0,0,0,.10,1.50,.10)
+            shaft.model=P.EquipmentTextures.shaft(7)
+            shaft.active=true
+        end
+        preview.shafts[i]={key=key,label=assetLabels[i],root=root,loaded=loaded,status=status,shaft=shaft}
+    end
+    return preview
 end
 
 local finishes = {
@@ -409,6 +476,7 @@ local finishes = {
     {rgb={208,132,121},rough=.16,metal=.76},
     {rgb={143,130,227},accent=color(85,225,221),rough=.17,metal=.76}
 }
+local gloveSizes={1,.91,1.07}
 
 local function buildMatch(r)
     if r.roadMatch then return r.roadMatch end
@@ -421,13 +489,19 @@ local function buildMatch(r)
         m.gloves[side]={pads=pads,cuff=cuff}
         local leg=r.legs[side]
         local fabric=material(black)
+        local sleeve=r.sleeveParts[side]
         m.sleeves[side]={fabric=fabric,
+            thighModel=sleeve[1].model,shinModel=sleeve[2].model,
             thigh=patch(r,leg.hip,overlay,0,-.326,-.001,.137,.274,.141),
             shin=patch(r,leg.knee,overlay,0,-.175,.002,.129,.441,.145)}
-        for _,part in ipairs(r.sleeveParts[side]) do part.material=fabric end
+        for _,part in ipairs(sleeve) do part.material=fabric end
     end
     r.roadMatch=m
     return m
+end
+
+local function gloveTexture(ops,finish,environment)
+    return mapOf(imported(ops.glovePattern),finish.rough,finish.metal,environment)
 end
 
 function Equipment.applyMatch(r,kit)
@@ -440,15 +514,16 @@ function Equipment.applyMatch(r,kit)
     r.materials.gloves.diffuse=finish.rgb and blendRGB(finish.rgb,gloveRGB,.22) or colorFromRGB(gloveRGB)
     r.materials.gloveTrim.diffuse=finish.accent or tint(ops.gloveSecondary)
     r.materials.gloves.roughness,r.materials.gloves.metalness=finish.rough,finish.metal
-    if ops.gloveFinish>1 then
-        local env=P.Character.equipmentEnvironment()
-        if env then pcall(function() r.materials.gloves.envMap=env end) end
-    end
+    local environment=ops.gloveFinish>1 and P.Character.equipmentEnvironment() or nil
+    if environment then pcall(function() r.materials.gloves.envMap=environment end) end
+    local gloveMap=gloveTexture(ops,finish,environment)
     m.cuff.diffuse=finish.accent or tint(ops.gloveAccent)
     for _,side in ipairs(sides) do
         local parts=m.gloves[side]
-        local scale=({1,.91,1.07})[ops.gloveModel]
-        r.arms[side].glove.scale=V(scale,1,scale)
+        local scale=gloveSizes[ops.gloveModel]
+        local shell=r.arms[side].glove
+        shell.scale=V(scale,1,scale)
+        resolvedSurface(shell,P.Character.gloveModel(),r.materials.gloves,gloveMap,"glove")
         parts.pads.position=V(0,.048,.132*scale)
         parts.cuff.active=ops.gloveCuff>1
         parts.cuff.scale=ops.gloveCuff==3 and V(.27,.075,.10) or V(.25,.043,.085)
@@ -456,9 +531,12 @@ function Equipment.applyMatch(r,kit)
         local wrap=m.sleeves[side]
         local style=ops[side.."Sleeve"]
         local pattern,shade=ops[side.."SleevePattern"],ops[side.."SleeveColor"]
+        local map=mapOf(imported(pattern))
+        local thigh,shin=r.sleeveParts[side][1],r.sleeveParts[side][2]
         wrap.fabric.diffuse=tint(shade)
-        r.sleeveParts[side][1].active=style==3
-        r.sleeveParts[side][2].active=style>=2
+        resolvedSurface(thigh,wrap.thighModel,wrap.fabric,style==3 and map,"sleeve")
+        resolvedSurface(shin,wrap.shinModel,wrap.fabric,style>=2 and map,"sleeve")
+        thigh.active,shin.active=style==3,style>=2
         r.exposedLegParts[side][1].active=style<3
         r.exposedLegParts[side][2].active=style<2
         coat(wrap.thigh,"tube",pattern,shade,style==3)
@@ -504,18 +582,48 @@ local function casualLook(profile,ops)
         local part=side=="left" and "Left" or "Right"
         local style=ops[side.."Sleeve"]
         local pattern,shade=ops[side.."SleevePattern"],ops[side.."SleeveColor"]
-        if style==3 then
+        if style==3 and patterns[pattern] then
             dye("thigh"..part,pattern,shade)
-        elseif ops.joggerPattern>1 then
+        elseif style~=3 and ops.joggerPattern>1 then
             dye("thigh"..part,ops.joggerPattern,ops.joggerColor)
         end
-        if style>=2 then
+        if style>=2 and patterns[pattern] then
             dye("shin"..part,pattern,shade)
-        elseif ops.joggerPattern>1 then
+        elseif style==1 and ops.joggerPattern>1 then
             dye("shin"..part,ops.joggerPattern,ops.joggerColor)
         end
     end
     return look
+end
+
+local function casualTextureGear(r,ops)
+    local environment=imported(ops.glovePattern) and ops.gloveFinish>1
+        and P.Character.equipmentEnvironment() or nil
+    local gloves=gloveTexture(ops,finishes[ops.gloveFinish],environment)
+    for i,side in ipairs(sides) do
+        local style=ops[side.."Sleeve"]
+        local map=style>=2 and mapOf(imported(ops[side.."SleevePattern"]))
+        if map then
+            local thigh,shin=r.thighs[i],r.shins[i]
+            if style==3 then resolvedSurface(thigh,thigh.model,thigh.material,map,"sleeve") end
+            resolvedSurface(shin,shin.model,shin.material,map,"sleeve")
+        end
+        if gloves then
+            r.casualGloves=r.casualGloves or {}
+            local glove=r.casualGloves[i]
+            if not glove then
+                glove=entity(r,r.wrists[i],0,-.102,0)
+                r.casualGloves[i]=glove
+            end
+            local size=gloveSizes[ops.gloveModel]
+            glove.scale=V(.53*size,.59,.48*size)
+            resolvedSurface(glove,P.Character.gloveModel(),nil,gloves,"glove")
+            glove.active=true
+        elseif r.casualGloves then
+            r.casualGloves[i].active=false
+        end
+        r.hands[i].active=not gloves
+    end
 end
 
 local function equipStowed(r,ops,kind)
@@ -529,6 +637,7 @@ end
 function Equipment.applyCasual(r,profile,kit,stickType)
     local ops=(kit or Equipment.restore()).equipped
     P.CampusCharacter.apply(r,casualLook(profile,ops))
+    casualTextureGear(r,ops)
     equipStowed(r,ops,stickType)
 end
 
@@ -541,6 +650,7 @@ function Equipment.newCasual(scene,profile,kit,stickType)
     r.backpackStick.eulerAngles=V(0,0,-6)
     r.stickRoot.parent=r.backpackStick
     r.stickRoot.position,r.stickRoot.eulerAngles=V(0,0,0),V(0,0,0)
+    casualTextureGear(r,ops)
     equipStowed(r,ops,stickType)
     return r
 end

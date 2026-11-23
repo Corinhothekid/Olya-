@@ -227,8 +227,10 @@ end
 local function dressTorso(r)
     local m = r.materials
     part(r, r.body, "jersey", m.jersey, function(mesh)
+        -- Keep the hem seated at the hip even when the upper body twists.
         loft(mesh, {
-            {.19, .30, .185}, {.32, .35, .22}, {.66, .39, .226},
+            {.035, .237, .149}, {.075, .278, .164}, {.136, .303, .190}, {.228, .325, .208},
+            {.32, .35, .22}, {.66, .39, .226},
             {.78, .40, .207}, {.87, .25, .15}
         }, 8, math.pi / 8, true)
     end, r.campusHidden)
@@ -245,7 +247,8 @@ local function dressTorso(r)
 
     part(r, r.body, "hoodie exterior", m.hoodie, function(mesh)
         loft(mesh, {
-            {.23, .301, .205}, {.31, .373, .236}, {.66, .404, .239},
+            {.040, .251, .160}, {.085, .294, .180}, {.154, .328, .204}, {.240, .355, .225},
+            {.31, .373, .236}, {.66, .404, .239},
             {.79, .405, .228}, {.88, .255, .17}
         }, 8, math.pi / 8, true)
         loft(mesh, {
@@ -263,6 +266,15 @@ local function dressTorso(r)
         rail(mesh, .009, {V(-.11, .833, -.205), V(-.084, .765, -.231), V(-.101, .675, -.241)})
         rail(mesh, .009, {V(.11, .833, -.205), V(.102, .76, -.234), V(.094, .655, -.242)})
     end, r.hoodieParts)
+end
+
+local function gloveShell(mesh)
+    bevel(mesh, 0, .047, .008, .245, .293, .237)
+    bevel(mesh, 0, .128, .001, .267, .101, .234)
+end
+
+function Character.gloveModel()
+    return model("glove shell",gloveShell)
 end
 
 local function arm(r, sign, name)
@@ -297,10 +309,7 @@ local function arm(r, sign, name)
         bevel(mesh, 0, -.049, -.105, .231, .20, .107)
         bevel(mesh, 0, -.052, .1, .196, .139, .067)
     end, r.campusHidden)
-    r.arms[name].glove = part(r, wrist, "glove shell", m.gloves, function(mesh)
-        bevel(mesh, 0, .047, .008, .245, .293, .237)
-        bevel(mesh, 0, .128, .001, .267, .101, .234)
-    end, r.campusHidden)
+    r.arms[name].glove = part(r, wrist, "glove shell", m.gloves, gloveShell, r.campusHidden)
     part(r, wrist, "glove joints", m.gloveTrim, function(mesh)
         for i = -1, 1 do
             bevel(mesh, i * .066, -.025, -.089, .054, .118, .068)

@@ -145,7 +145,9 @@ function Human.body(look)
     local edge=tone(look.shirt,.73)
     local highlight=tone(look.shirt,1.13)
     return meshModel(function(mesh)
-        loft(mesh,{{-.035,.132,.091,.007},{-.007,.153,.111,.005},{.035,.163,.118,.005},
+        -- Let the hem hang below the torso pivot into the trousers during turns.
+        loft(mesh,{{-.096,.151,.104,.007},{-.082,.159,.114,.006},{-.049,.164,.119,.004},
+            {.035,.164,.118,.005},
             {.120,.160,.116,.009},{.220,.163,.105,.009},{.330,.178,.124,.004},
             {.432,.188,.127,.007},{.505,.184,.114,.013},{.549,.156,.084,.013},
             {.584,.105,.065,.013},{.602,.059,.052,.008}},14,cloth,
@@ -206,11 +208,13 @@ end
 
 function Human.pelvis(look)
     return meshModel(function(mesh)
-        loft(mesh,{{-.107,.107,.047,.023},{-.077,.131,.070,.014},{-.026,.153,.096,.012},
-            {.046,.160,.108,.009},{.091,.156,.107,.006},{.120,.144,.099,.005}},12,
+        -- The shaped seat fills the space between the moving thighs and the shirt.
+        loft(mesh,{{-.145,.110,.062,.014},{-.105,.135,.083,.014},{-.056,.155,.104,.011},
+            {-.009,.164,.114,.006},{.046,.161,.110,.008},{.103,.149,.103,.006},
+            {.144,.129,.088,.006}},12,
             dye(look.pants),function(x,y,z,s,c)
-                local bottom=math.max(0,math.min(1,-y/.108))
-                return x,y+bottom*.054*(1-s*s),z+bottom*.023*math.max(0,c)
+                local bottom=math.max(0,math.min(1,-y/.145))
+                return x,y+bottom*.041*(1-s*s),z+bottom*.017*math.max(0,c)
             end)
     end)
 end

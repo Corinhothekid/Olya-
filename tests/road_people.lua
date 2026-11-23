@@ -3,7 +3,8 @@ local helpers=(arg and arg[0] and arg[0]:match("^(.*[/])"))
     or os.getenv("POLYLAX_TEST_CHECKS") or "tests/"
 local project=(arg and arg[1]) or os.getenv("POLYLAX_TEST_PROJECT") or "PolyLax.codea"
 dofile(helpers.."craft_mock.lua")
-for _,tab in ipairs({"GoalPhysics","CampusPeople","CampusHumanMeshes","CampusCharacter","CampusMotion","FreeRoamWorld"}) do
+for _,tab in ipairs({"GoalPhysics","CampusPeople","CampusHumanMeshes","CampusCharacter","CampusMotion",
+    "FreeRoamWorld","Character","AnimationController"}) do
     dofile(project.."/"..tab..".lua")
 end
 
@@ -34,6 +35,40 @@ local function checkMesh(model)
     end
 end
 
+-- Probe the front and back surfaces at the seam in pelvis space. A bounding box
+-- overlap alone misses the holes left by tapered meshes when the torso leans.
+local function coversWaist(part,pelvis,height,width,depth)
+    local points={}
+    for i,point in ipairs(part.model.positions) do
+        points[i]=pelvis:inverseTransformPoint(part:transformPoint(point))
+    end
+    for _,x in ipairs({-width,0,width}) do
+        local front,back=math.huge,-math.huge
+        local indices=part.model.indices
+        for i=1,#indices,3 do
+            local a,b,c=points[indices[i]],points[indices[i+1]],points[indices[i+2]]
+            local denominator=(b.y-c.y)*(a.x-c.x)+(c.x-b.x)*(a.y-c.y)
+            if math.abs(denominator)>1e-7 then
+                local u=((b.y-c.y)*(x-c.x)+(c.x-b.x)*(height-c.y))/denominator
+                local v=((c.y-a.y)*(x-c.x)+(a.x-c.x)*(height-c.y))/denominator
+                local w=1-u-v
+                if math.min(u,v,w)>=-1e-6 then
+                    local z=u*a.z+v*b.z+w*c.z
+                    front,back=math.min(front,z),math.max(back,z)
+                end
+            end
+        end
+        if front>=-depth or back<=depth then return false end
+    end
+    return true
+end
+
+local function checkCampusWaist(rig)
+    assert(coversWaist(rig.outfit,rig.pelvis,.020,.075,.042),"The top lifted off the campus waist")
+    assert(coversWaist(rig.waist,rig.pelvis,.020,.075,.042),"Campus trousers do not meet the hem")
+    assert(coversWaist(rig.waist,rig.pelvis,-.072,.068,.028),"The trouser seat pulled away from the legs")
+end
+
 local rooms={}
 local models={}
 for zone, ids in pairs({
@@ -50,6 +85,8 @@ for zone, ids in pairs({
         assert(face.model.positions and #face.model.positions>100)
         checkMesh(face.model)
         checkMesh(actor.rig.outfit.model)
+        checkMesh(actor.rig.waist.model)
+        checkCampusWaist(actor.rig)
         assert(actor.rig.legs[1].parent==actor.rig.pelvis and actor.rig.torso.parent==actor.rig.pelvis)
         local function extent(part,axis)
             local low,high=math.huge,-math.huge
@@ -81,7 +118,8 @@ for zone, ids in pairs({
         models[face.model]=true
         for i=1,2 do
             assert(actor.elbows[i].parent==actor.arms[i] and actor.knees[i].parent==actor.legs[i])
-            assert(actor.rig.hands[i].model and actor.rig.hands[i].parent==actor.elbows[i])
+            assert(actor.rig.hands[i].model and actor.rig.hands[i].parent==actor.rig.wrists[i]
+                and actor.rig.wrists[i].parent==actor.elbows[i])
             assert(actor.rig.feet[i].model and actor.rig.feet[i].parent==actor.knees[i])
             checkMesh(actor.rig.hands[i].model)
             checkMesh(actor.rig.feet[i].model)
@@ -165,6 +203,26 @@ for _=1,10 do
     Motion.update(measured,.05,"walk",.7)
 end
 assert(math.abs(easy.stride-measured.stride)>.07,"Named gait profiles produced the same stride")
+for _=1,15 do
+    Motion.update(easy,.05,"run",5.9,-1)
+    checkCampusWaist(easy.rig)
+end
+
+local match=PolyLax.Character.new(craft.scene())
+local shirt,shorts
+for _,part in ipairs(match.scene.entities) do
+    if part.parent==match.body and part.material==match.materials.jersey then shirt=part end
+    if part.parent==match.pelvis and part.material==match.materials.shorts then shorts=part end
+end
+assert(shirt and shorts and match.hoodieParts[1],"Match waist parts missing")
+for _,action in ipairs({"dodge","shoot","scoop"}) do
+    for _,pose in ipairs(PolyLax.AnimationController.clips[action].poses) do
+        match.body.eulerAngles=pose.torso
+        assert(coversWaist(shorts,match.pelvis,.193,.09,.10),"Match shorts waistband missing")
+        assert(coversWaist(shirt,match.pelvis,.193,.09,.05),"Jersey waist separated during "..action)
+        assert(coversWaist(match.hoodieParts[1],match.pelvis,.193,.09,.05),"Hoodie waist separated during "..action)
+    end
+end
 local bent,moved=false,false
 for _=1,90 do
     World.update(campus,.08,"evening",x+8,z)
@@ -176,5 +234,5 @@ assert(ethan.point.x==ethan.x and ethan.point.z==ethan.z,"NPC interaction lost i
 World.update(campus,.08,"evening",x+32,z)
 assert(not ethan.root.active,"Distant NPC stayed active")
 assert(#campus.scene.entities==entityCount,"NPC updates created scene entities")
-print(("NPC identities, generated roles, part swapping, silhouette, gestures, gait, culling and reuse passed (%d campus entities).")
+print(("Campus and match waist coverage, NPC identities, gestures, gait, culling and reuse passed (%d campus entities).")
     :format(entityCount))

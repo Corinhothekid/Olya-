@@ -3,6 +3,9 @@ local tests = (arg and arg[0] and arg[0]:match("^(.*[/])"))
     or os.getenv("POLYLAX_TEST_CHECKS") or "tests/"
 local project = arg and arg[1] or os.getenv("POLYLAX_TEST_PROJECT") or "PolyLax.codea"
 local mock = dofile(tests.."craft_mock.lua")
+local zebraImage={width=48,height=48}
+asset={zebra="zebra-fixture"}
+function readImage(ref) if ref==asset.zebra then return zebraImage end end
 WIDTH = tonumber(os.getenv("POLYLAX_TEST_WIDTH")) or WIDTH
 HEIGHT = tonumber(os.getenv("POLYLAX_TEST_HEIGHT")) or HEIGHT
 viewer = {safeArea={top=44,bottom=34,left=0,right=0}}
@@ -352,12 +355,16 @@ local function shopTap(id)
 end
 local original=road.story.equipment.equipped.shaftPattern
 local balance=road.story.equipment.credits
-shopTap("VALUE_NEXT")
+local shaftField=P.RoadEquipment.fields.shaftPattern
+local zebraChoice=#shaftField[3]
+assert(shaftField[3][zebraChoice]=="Imported Zebra")
+shopTap("VALUE_PREV")
+assert(shop.rig.roadStick.upper.material.map==zebraImage,"Imported preview lost its image")
 assert(road.story.equipment.equipped.shaftPattern==original,"Preview changed the save")
 shopTap("BUY")
 assert(road.story.equipment.credits<balance)
 shopTap("EQUIP")
-assert(road.story.equipment.equipped.shaftPattern==2,"Shaft pattern was not equipped")
+assert(road.story.equipment.equipped.shaftPattern==zebraChoice,"Shaft pattern was not equipped")
 shopTap("GLOVES")
 shopTap("VALUE_NEXT")
 shopTap("BUY")
@@ -375,8 +382,9 @@ shopTap("SAVE_PRESET")
 assert(road.story.equipment.presets["1"].gloveFinish==2)
 shopTap("BACK")
 assert(app.page=="ROAD" and roam.zone=="drip")
-assert(road.story.equipment.equipped.shaftPattern==2 and road.story.equipment.equipped.leftSleeve==2)
+assert(road.story.equipment.equipped.shaftPattern==zebraChoice and road.story.equipment.equipped.leftSleeve==2)
 assert(roam.rig.stickRoot.parent==roam.rig.backpackStick)
+assert(roam.rig.roadStick.upper.material.map==zebraImage,"Hub lost the equipped image")
 
 visit("lockers")
 interact("tryout")
@@ -396,6 +404,7 @@ local function finishActivity()
     assert(game.positioning and #game.squad==20,"Story did not open the actual FullMatch engine")
     local athlete=P.FullMatch.careerAthlete(game)
     assert(athlete and athlete.rig.root.active and not athlete.rig.campus,"Story match retained the casual rig")
+    assert(athlete.rig.roadStick.upper.material.map==zebraImage,"Match lost the equipped image")
     assert(athlete.rig.materials.gloves.metalness>.5,"Equipped chrome gloves did not reach the match rig")
     assert(game.statistics.players["road-ethan"].name=="Ethan Cole","Ethan was missing from the actual lineup")
     if session.presentation then P.Presentation.skip(session) end
@@ -474,7 +483,8 @@ road=assert(app.road)
 restored=P.FreeRoam.location(road.roam)
 assert(road.story.mission=="complete" and road.story.results.tryout.grade==evaluation.grade)
 assert(P.Athlete.names(road.story.athlete)=="Jordan")
-assert(road.story.equipment.equipped.shaftPattern==2 and road.story.equipment.equipped.leftSleeve==2)
+assert(road.story.equipment.equipped.shaftPattern==zebraChoice and road.story.equipment.equipped.leftSleeve==2)
+assert(road.roam.rig.roadStick.upper.material.map==zebraImage,"Reloaded shaft lost the image")
 assert(road.story.equipment.equipped.gloveFinish==2 and road.story.equipment.presets["1"])
 assert(restored.zone==clubLocation.zone and almost(restored.x,clubLocation.x)
     and almost(restored.z,clubLocation.z) and almost(restored.yaw,clubLocation.yaw)

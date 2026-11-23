@@ -69,6 +69,7 @@ function Character.apply(rig,look)
         local leg = table.concat({pants,look.frame or "",look.outfit,side},"/")
         rig.thighs[i].model = cache("thigh",geometry.limb,leg.."/"..(patterns[top] or ""),look,"thigh",side)
         rig.shins[i].model = cache("shin",geometry.limb,leg.."/"..(patterns[bottom] or ""),look,"shin",side)
+        rig.thighs[i].material,rig.shins[i].material = surface,surface
         local accessory = side < 0 and look.accessory or ""
         local hand = table.concat({skin,side,accessory or "",trim},"/")
         rig.hands[i].model = cache("hand",geometry.hand,hand,look,side)
@@ -104,7 +105,7 @@ function Character.new(scene,look)
     for i,side in ipairs(sides) do
         local shoulder = node(scene,rig.torso,side*.185,.535,0)
         local elbow = node(scene,shoulder,0,-.285,0)
-        local wrist = renderable(scene,elbow,0,-.247,0)
+        local wrist = node(scene,elbow,0,-.247,0)
         local hip = node(scene,rig.pelvis,side*.087,0,0)
         local knee = node(scene,hip,0,-.455,0)
         local ankle = renderable(scene,knee,0,-.456,0)
@@ -112,7 +113,7 @@ function Character.new(scene,look)
         rig.forearms[i] = renderable(scene,elbow)
         rig.thighs[i] = renderable(scene,hip)
         rig.shins[i] = renderable(scene,knee)
-        rig.hands[i],rig.feet[i] = wrist,ankle
+        rig.hands[i],rig.feet[i] = renderable(scene,wrist),ankle
         rig.arms[i],rig.elbows[i],rig.wrists[i] = shoulder,elbow,wrist
         rig.legs[i],rig.knees[i],rig.ankles[i] = hip,knee,ankle
     end
