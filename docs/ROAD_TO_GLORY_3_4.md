@@ -1,18 +1,18 @@
-# PolyLax Road to Glory 3.4.1
+# PolyLax Road to Glory 3.4.2
 
 **Brothers in Arms, Act I · The Freshmen** runs from the first day at Briarbank through the tryout, placement decision, and the first team game.
 
 ## Install and play
 
 1. Back up your installed project. Keep the original project in Codea so its imported logo, soundtrack, and saves remain available.
-2. In a single-tab Legacy Craft project, replace all of Main with `releases/PolyLax-3.4.1-Main.lua` through `-- End of PolyLax 3.4.1`. For a modular project, update the `PolyLax.codea/` source using `Info.plist` for tab order. If you already have every 3.4 tab, update only RoadEquipment, Main, and Style. Use one installation format for your project.
+2. In a single-tab Legacy Craft project, replace all of Main with `releases/PolyLax-3.4.2-Main.lua` through `-- End of PolyLax 3.4.2`. For a modular project, update the `PolyLax.codea/` source using `Info.plist` for tab order. If you already have every 3.4.1 tab, update FreeRoam, FreeRoamUI, FreeRoamWorld, Story, Main, and Style. Use one installation format for your project.
 3. Run PolyLax and tap **Road to Glory**. The **Career** button in the campus HUD opens the journal and existing athlete editor. Edit the athlete before the tryout to choose a name, appearance, team, and one of the seven positions.
 4. Follow the objective tracker from Ethan in the courtyard to Mercer inside the school, Jace at the practice field, and Nina in the Drip Lab. Preview and equip cosmetics at the shop. Go to the locker room, complete first practice, and return to the bench to start the tryout.
 5. Close the match box score to return. Seek Mercer for your placement, then find Ethan. Play the first game when directed. Enter the clubhouse and choose **Enter Pro Clubs** to use the existing online Clubs menu. **Return to Campus** resumes your exploration in the clubhouse.
 
 ## Controls
 
-The left stick walks or runs based on displacement. Drag the right side of the screen or use the arrow controls to orbit the camera. **Interact** shows the nearest door, person, or station. **Equipment** opens the lab menu when inside Drip Lab. Pause offers resume, settings, and main-menu navigation. The existing practice and match controls are active during lacrosse.
+The left stick walks or runs based on displacement. Drag the right side of the screen or use the arrow controls to orbit the camera. Use **−** and **+** to zoom. Your zoom carries through doors and saves with your camera angle. **Interact** shows the nearest door, person, or station. **Equipment** opens the lab menu when inside Drip Lab. Pause offers resume, settings, and main-menu navigation. The existing practice and match controls are active during lacrosse.
 
 ## Saves and developer testing
 
@@ -27,6 +27,8 @@ The campus, six interiors, first-day storyline, first practice, tryout, placemen
 Drip Lab includes the 13 pattern families, five approximated chrome finishes, individual sleeve controls, a rotating preview, ownership, and loadout presets. A cached procedural pattern mesh provides the color layouts. Pocket and shaft selections are cosmetic. The player's position still controls stick reach and save behavior.
 
 ## Changed files
+
+The 3.4.2 update gives campus NPCs distinct human features and outfits, corrects left and right movement and facade lettering, and adds saved camera zoom. Existing saves open at the standard zoom until you adjust it.
 
 The 3.4.1 patch fixes the touch crash caused by blending shoe or backpack trim with values read back from Craft materials. Color calculations now use the same numeric palette across campus, Drip Lab, and the playing kit. The save formats and equipment choices stay compatible.
 
@@ -43,9 +45,10 @@ From the repository root, run the Lua tests with Lua 5.4 and the shared Craft te
 lua tests/road_story.lua
 lua tests/road_equipment.lua
 lua tests/road_color.lua
+lua tests/road_people.lua
 lua tests/road_app.lua
 POLYLAX_TEST_WIDTH=320 POLYLAX_TEST_HEIGHT=568 lua tests/road_app.lua
-python3 tools/package_codea.py --version 3.4.1 --check-main releases/PolyLax-3.4.1-Main.lua
+python3 tools/package_codea.py --version 3.4.2 --check-main releases/PolyLax-3.4.2-Main.lua
 ```
 
 The app tests use real game code and mocked Codea graphics, touch events, and local storage. They reach the practice field and match engine, record both game outcomes, reopen the Clubs menu, and verify a saved return to the same campus location and camera angle. For device validation, repeat that route on an iPhone and check camera framing, outfit materials, performance during zone transitions, and the Clubs return after an online session.

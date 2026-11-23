@@ -10,7 +10,7 @@ local zones = {campus=true,school=true,lockers=true,training=true,coach=true,dri
 local targets = {mercer="coach",driplab="drip",locker="tryout",field="practice"}
 local act = "freshmen"
 local relationships = {ethan=55,coach=36,jace=26}
-local startPosition = {zone="campus",x=0,z=9,yaw=0,cameraYaw=0}
+local startPosition = {zone="campus",x=0,z=9,yaw=0,cameraYaw=0,zoomSteps=0}
 local placements = {"JV development","JV rotation","Varsity rotation"}
 
 local function copy(value)
@@ -40,7 +40,8 @@ local function sanitizeLocation(raw)
         return copy(startPosition)
     end
     return {zone=raw.zone,x=raw.x,z=raw.z,yaw=finite(raw.yaw) and raw.yaw or 0,
-        cameraYaw=finite(raw.cameraYaw) and raw.cameraYaw or 0}
+        cameraYaw=finite(raw.cameraYaw) and raw.cameraYaw or 0,
+        zoomSteps=count(raw.zoomSteps,0,-3,3)}
 end
 
 local function equipment(raw)

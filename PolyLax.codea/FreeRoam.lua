@@ -8,6 +8,8 @@ local atan2 = math.atan2 or math.atan
 local up = vec3(0, 1, 0)
 local fadeTime = .22
 local walkSpeed, runSpeed = 2.7, 5.7
+local defaultFov, fovStep = 49, 4
+FreeRoam.minZoom, FreeRoam.maxZoom = -3, 3
 
 local function finite(value, fallback)
     if type(value) == "number" and value == value and math.abs(value) < math.huge then return value end
@@ -22,15 +24,21 @@ local function ease(rate, dt)
     return 1-math.exp(-rate*dt)
 end
 
+local function clampZoom(steps)
+    return math.max(FreeRoam.minZoom,math.min(FreeRoam.maxZoom,math.floor(finite(steps,0))))
+end
+
 function FreeRoam.location(roam)
-    return {zone=roam.zone,x=roam.x,z=roam.z,yaw=roam.yaw,cameraYaw=roam.viewYaw}
+    return {zone=roam.zone,x=roam.x,z=roam.z,yaw=roam.yaw,
+        cameraYaw=roam.viewYaw,zoomSteps=roam.zoomSteps}
 end
 
 function FreeRoam.checkpoint(roam)
     local location = FreeRoam.location(roam)
     local saved = roam.lastSaved
     if not roam.save or saved and saved.zone == location.zone and saved.x == location.x
-        and saved.z == location.z and saved.yaw == location.yaw and saved.cameraYaw == location.cameraYaw then
+        and saved.z == location.z and saved.yaw == location.yaw and saved.cameraYaw == location.cameraYaw
+        and saved.zoomSteps == location.zoomSteps then
         return true
     end
     local ok, result, reason = pcall(roam.save, location)
@@ -55,6 +63,13 @@ end
 
 local function poseCamera(roam, dt)
     local camera = roam.camera
+    local targetFov = defaultFov - fovStep*roam.zoomSteps
+    if camera.fieldOfView ~= targetFov then
+        local fov = camera.fieldOfView+(targetFov-camera.fieldOfView)*ease(13,dt)
+        if math.abs(fov-targetFov)<.02 then fov=targetFov end
+        camera.fieldOfView,camera.lens.fieldOfView = fov,fov
+        camera.tanHalf = math.tan(math.rad(fov)*.5)
+    end
     local turn = angleDifference(roam.viewYaw,roam.cameraYaw)
     roam.cameraYaw = (roam.cameraYaw + turn*ease(10,dt))%360
     local angle = math.rad(roam.cameraYaw)
@@ -91,9 +106,12 @@ local function openZone(roam, location)
     roam.yaw = finite(location.yaw,0)%360
     roam.viewYaw = finite(location.cameraYaw,0)%360
     roam.cameraYaw = roam.viewYaw
+    roam.zoomSteps = clampZoom(location.zoomSteps)
     roam.scene = scene
     roam.world = world.new(scene,zone)
-    roam.camera = P.CameraController.new(scene,49)
+    local fov = defaultFov-fovStep*roam.zoomSteps
+    roam.camera = P.CameraController.new(scene,fov)
+    roam.camera.fieldOfView = fov
     roam.rig = P.RoadEquipment.newCasual(scene,roam.profile,roam.equipment,roam.stickType)
     place(roam)
     roam.animation = P.AnimationController.new(roam.rig)
@@ -137,7 +155,8 @@ function FreeRoam.interact(roam)
     if point.zone then
         roam.transition = {
             elapsed=0, moved=false, location={zone=point.zone,x=point.spawnX,z=point.spawnZ,
-                yaw=point.spawnYaw or point.yaw,cameraYaw=point.cameraYaw or point.spawnYaw}
+                yaw=point.spawnYaw or point.yaw,cameraYaw=point.cameraYaw or point.spawnYaw,
+                zoomSteps=roam.zoomSteps}
         }
     else
         FreeRoam.checkpoint(roam)
@@ -155,7 +174,7 @@ local function movement(roam, dt)
     local cruise = walkSpeed + (runSpeed-walkSpeed)*math.max(0,(intensity-.53)/.47)
     local angle = math.rad(roam.cameraYaw)
     local s,c = math.sin(angle), math.cos(angle)
-    local vx,vz = (-c*x-s*y)*cruise,(s*x-c*y)*cruise
+    local vx,vz = (c*x-s*y)*cruise,(-s*x-c*y)*cruise
     local blend = ease(intensity>.01 and 9 or 12,dt)
     roam.vx = roam.vx+(vx-roam.vx)*blend
     roam.vz = roam.vz+(vz-roam.vz)*blend
@@ -240,6 +259,9 @@ local function handleAction(roam, item)
         FreeRoam.interact(roam)
     elseif id == "orbitLeft" or id == "orbitRight" then
         roam.viewYaw = (roam.viewYaw+(id=="orbitLeft" and -30 or 30))%360
+    elseif id == "zoomIn" or id == "zoomOut" then
+        roam.zoomSteps = clampZoom(roam.zoomSteps+(id=="zoomIn" and 1 or -1))
+        FreeRoam.checkpoint(roam)
     elseif id == "pause" or id == "resume" then
         roam.paused = id=="pause"
         FreeRoam.release(roam)

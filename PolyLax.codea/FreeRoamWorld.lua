@@ -90,11 +90,10 @@ local palette = {
     concrete={149,157,153}, road={77,84,83}, pavement={119,130,127}, glass={61,108,128,.22},
     navy={31,53,68}, dark={28,44,50}, metal={99,123,128,.48}, gold={221,162,78,.58},
     wood={158,110,72}, orange={217,99,64}, teal={60,144,132}, violet={114,97,146},
-    light={242,217,155,.25}, rubber={54,61,61}, shoe={237,235,224}
+    light={242,217,155,.25}, rubber={54,61,61}, avatarPaint={255,255,255}
 }
 local swatches = {}
 local V = vec3
-local cubeModel
 
 local function material(key)
     local value = swatches[key]
@@ -152,17 +151,19 @@ local glyphs = {
 }
 
 local function sign(world,text,x,y,z,cell,ink)
-    local start=x+(#text*4-1)*cell*.5
+    -- Signs are read from the +Z side of each facade.
+    local start=x-(#text*4-1)*cell*.5
     for index=1,#text do
         local glyph=glyphs[text:sub(index,index)]
         if glyph then
             for row,mask in ipairs(glyph) do
                 for col=0,2 do
                     if math.floor(mask/2^(2-col))%2==1 then
-                        local left = start-((index-1)*4+col)*cell
+                        local left = start+((index-1)*4+col)*cell
+                        local right = left+cell*.9
                         local top = y+(3-row)*cell
-                        quad(world,ink,V(left,top,z),V(left-cell*.9,top,z),
-                            V(left-cell*.9,top-cell*.9,z),V(left,top-cell*.9,z))
+                        quad(world,ink,V(left,top,z),V(left,top-cell*.9,z),
+                            V(right,top-cell*.9,z),V(right,top,z))
                     end
                 end
             end
@@ -410,35 +411,237 @@ local npcPaths={
     drip={{0,-2.05},{.68,-2.60},{.86,-1.8},{.21,-1.38}}
 }
 
-local function createAvatar(world,id,shirt,point)
-    cubeModel=cubeModel or craft.model.cube(V(1,1,1))
+local npcLooks = {
+    ethan={height=1.02,width=.97,faceWidth=.98,faceHeight=1.04,skin={195,134,102},hair={86,47,33},haircut="sweep",
+        shirt={40,102,91},trim={126,178,157},pants={48,67,86},shoe={230,232,221},outfit="hoodie"},
+    jace={height=1.07,width=1.13,faceWidth=.97,faceHeight=1.01,skin={126,80,60},hair={26,23,24},haircut="crop",
+        shirt={171,63,37},trim={237,218,172},pants={39,48,69},shoe={218,225,230},outfit="varsity"},
+    coach={height=1.05,width=1.11,faceWidth=1.02,faceHeight=1.04,skin={200,148,111},hair={98,94,89},
+        haircut="neat",beard=true,glasses=true,
+        shirt={43,59,85},trim={150,166,179},pants={88,92,77},shoe={111,80,62},outfit="jacket"},
+    drip={height=.96,width=.95,faceWidth=.98,faceHeight=1.04,skin={150,94,72},hair={41,29,35},
+        haircut="bun",earrings=true,
+        shirt={101,78,156},trim={241,160,100},pants={50,47,71},shoe={177,147,223},outfit="apron"},
+    studentA={height=.95,width=.94,faceWidth=1.04,faceHeight=.97,skin={105,64,51},hair={29,24,28},
+        haircut="bob",glasses=true,
+        shirt={171,100,51},trim={230,187,99},pants={58,65,95},shoe={223,208,173},outfit="pack"},
+    studentB={height=1.00,width=.94,faceWidth=.95,faceHeight=1.08,skin={224,169,130},hair={141,86,48},haircut="curls",
+        shirt={103,63,79},trim={202,141,177},pants={62,77,74},shoe={204,224,219},outfit="pack"}
+}
+local npcAssets = {}
+local limbModel
+local neutral, eyeWhite, iris=color(255,255,255),color(248,239,223),color(44,33,30)
+local sides = {-1,1}
+
+local function dye(rgb)
+    return color(rgb[1],rgb[2],rgb[3])
+end
+
+local function paintQuad(mesh,a,b,c,d,ink)
+    local verts,indices=mesh.positions,mesh.indices
+    local at, offset=#verts,#indices
+    local normal=(b-a):cross(c-a):normalize()
+    verts[at+1],verts[at+2],verts[at+3],verts[at+4]=a,b,c,d
+    for k=at+1,at+4 do mesh.normals[k],mesh.colors[k]=normal,ink end
+    indices[offset+1],indices[offset+2],indices[offset+3]=at+1,at+2,at+3
+    indices[offset+4],indices[offset+5],indices[offset+6]=at+1,at+3,at+4
+end
+
+local function paintedModel(build)
+    local mesh={positions={},normals={},indices={},colors={}}
+    build(mesh)
+    local uv,uvs=vec2(0,0),{}
+    for i=1,#mesh.positions do uvs[i]=uv end
+    local model=craft.model()
+    model.positions,model.normals,model.indices=mesh.positions,mesh.normals,mesh.indices
+    model.colors,model.uvs=mesh.colors,uvs
+    return model
+end
+
+-- Rings give soft silhouettes and leave the face, clothing and hair in two draw calls.
+local function loft(mesh, rings, sides, ink, x)
+    local function point(row, i)
+        local angle=math.pi*2*i/sides
+        local forward=math.cos(angle)
+        return V((x or 0)+row[2]*math.sin(angle),row[1]-(row[5] or 0)*(1-forward)*.5,
+            (row[4] or 0)-row[3]*forward)
+    end
+    for i=1,#rings-1 do
+        local lower,upper=rings[i],rings[i+1]
+        for side=0,sides-1 do
+            paintQuad(mesh,point(lower,side),point(upper,side),
+                point(upper,side+1),point(lower,side+1),ink)
+        end
+    end
+end
+
+local function badge(mesh,x,y,z,w,h,d,ink)
+    local first,last=x-w*.5,x+w*.5
+    local low,high,front,back=y-h*.5,y+h*.5,z-d*.5,z+d*.5
+    local a,b,c,e=V(first,low,front),V(last,low,front),V(last,high,front),V(first,high,front)
+    local f,g,i,j=V(first,low,back),V(last,low,back),V(last,high,back),V(first,high,back)
+    paintQuad(mesh,a,e,c,b,ink)
+    paintQuad(mesh,f,g,i,j,ink)
+    paintQuad(mesh,a,f,j,e,ink)
+    paintQuad(mesh,b,c,i,g,ink)
+    paintQuad(mesh,e,j,i,c,ink)
+    paintQuad(mesh,a,b,g,f,ink)
+end
+
+local function smallOval(mesh,x,y,z,w,h,d,ink)
+    loft(mesh,{{y-h*.5,.001,.001,z},{y-h*.24,w*.83,d*.82,z},
+        {y,w,d,z},{y+h*.24,w*.83,d*.82,z},{y+h*.5,.001,.001,z}},8,ink,x)
+end
+
+local function faceModel(look)
+    local skin,hair=dye(look.skin),dye(look.hair)
+    local hairGlint=color(look.hair[1]+16,look.hair[2]+12,look.hair[3]+10)
+    local lip=color(look.skin[1]*.62,look.skin[2]*.53,look.skin[3]*.55)
+    return paintedModel(function(mesh)
+        loft(mesh,{{-.19,.058,.07,.017},{-.16,.107,.112,.008},{-.082,.155,.135},
+            {.026,.166,.151},{.097,.167,.146,.007},{.154,.140,.134,.013},
+            {.181,.082,.080,.02},{.188,.002,.002,.023}},10,skin)
+        for _,side in ipairs({-1,1}) do
+            smallOval(mesh,side*.158,-.024,.014,.037,.090,.047,skin)
+            smallOval(mesh,side*.070,.033,-.131,.045,.041,.018,eyeWhite)
+            smallOval(mesh,side*.066,.031,-.148,.019,.039,.008,iris)
+            badge(mesh,side*.072,.071,-.136,.064,.013,.018,hair)
+        end
+        smallOval(mesh,0,-.021,-.145,.027,.086,.031,skin)
+        smallOval(mesh,0,-.079,-.134,.042,.015,.008,lip)
+        local cut=look.haircut
+        local drop=cut=="bob" and .231 or cut=="sweep" and .095 or cut=="neat" and .080 or .114
+        local top=cut=="curls" and .238 or cut=="crop" and .207 or .225
+        loft(mesh,{{.108,.170,.149,.010,drop},{.145,.171,.152,.011,drop*.39},
+            {.183,.157,.133,.019},{top-.017,.092,.097,.011},{top,.001,.001,.009}},10,hair)
+        if cut=="sweep" or cut=="neat" then
+            smallOval(mesh,-.053,.146,-.106,.107,.114,.080,hair)
+            smallOval(mesh,-.076,.192,-.081,.072,.045,.066,hairGlint)
+        elseif cut=="curls" then
+            for _,x in ipairs({-.093,.003,.091}) do
+                smallOval(mesh,x,.204,-.048,.061,.081,.073,x==.003 and hairGlint or hair)
+            end
+        elseif cut=="bun" then
+            smallOval(mesh,0,.120,.164,.086,.163,.086,hair)
+            smallOval(mesh,-.074,.142,-.105,.077,.095,.066,hairGlint)
+        elseif cut=="bob" then
+            for _,side in ipairs({-1,1}) do
+                smallOval(mesh,side*.138,-.025,.049,.053,.270,.113,hair)
+            end
+        end
+        if look.beard then
+            local beard=color(101,87,78)
+            loft(mesh,{{-.187,.035,.043,-.043},{-.156,.098,.114,-.018},
+                {-.115,.133,.135,.002},{-.092,.102,.089,.025}},8,beard)
+            badge(mesh,0,-.064,-.142,.078,.016,.015,beard)
+        end
+        if look.glasses then
+            local frame=color(59,51,48)
+            for _,side in ipairs({-1,1}) do
+                badge(mesh,side*.070,.063,-.148,.096,.012,.012,frame)
+                badge(mesh,side*.070,.004,-.150,.096,.010,.014,frame)
+                for _,endX in ipairs({.027,.111}) do
+                    badge(mesh,side*endX,.035,-.145,.010,.056,.014,frame)
+                end
+                badge(mesh,side*.152,.048,-.070,.015,.013,.151,frame)
+            end
+            badge(mesh,0,.044,-.161,.045,.011,.011,frame)
+        end
+        if look.earrings then
+            local gold=color(239,206,135)
+            smallOval(mesh,-.163,-.072,-.005,.012,.034,.012,gold)
+            smallOval(mesh,.163,-.072,-.005,.012,.034,.012,gold)
+        end
+    end)
+end
+
+local function costumeModel(look)
+    local shirt,trim=dye(look.shirt),dye(look.trim)
+    return paintedModel(function(mesh)
+        loft(mesh,{{-.33,.18,.093},{-.309,.194,.119},{-.13,.197,.134},
+            {.064,.244,.136},{.185,.251,.119},{.229,.163,.099},
+            {.244,.087,.076},{.248,.065,.061}},10,shirt)
+        if look.outfit=="hoodie" then
+            smallOval(mesh,0,.202,.085,.150,.194,.089,shirt)
+            badge(mesh,0,-.176,-.125,.245,.089,.025,trim)
+            for _,side in ipairs({-1,1}) do
+                badge(mesh,side*.043,.075,-.139,.010,.106,.012,trim)
+            end
+        elseif look.outfit=="pack" then
+            smallOval(mesh,0,-.04,.155,.186,.441,.090,trim)
+            for _,side in ipairs({-1,1}) do
+                badge(mesh,side*.144,-.021,-.124,.037,.405,.029,trim)
+            end
+        elseif look.outfit=="apron" then
+            badge(mesh,0,-.117,-.125,.267,.352,.026,trim)
+            badge(mesh,0,-.187,-.141,.201,.018,.021,shirt)
+        else
+            badge(mesh,0,-.049,-.132,.014,.459,.018,trim)
+            badge(mesh,0,.174,-.114,.117,.035,.027,trim)
+            badge(mesh,.115,.061,-.130,.068,.041,.025,trim)
+        end
+    end)
+end
+
+local function avatarParts(id, look)
+    if npcAssets[id] then return npcAssets[id] end
+    local function fabric(rgb)
+        local standard=asset and asset.builtin and asset.builtin.Materials
+        local mat=craft.material(standard and standard.Standard or "Materials:Standard")
+        mat.diffuse,mat.roughness=dye(rgb),.9
+        return mat
+    end
+    local parts={face=faceModel(look),body=costumeModel(look),skin=fabric(look.skin),
+        shirt=fabric(look.shirt),trim=fabric(look.trim),pants=fabric(look.pants),shoe=fabric(look.shoe)}
+    npcAssets[id]=parts
+    return parts
+end
+
+local function createAvatar(world,id,point)
     local scene=world.scene
     local root=scene:entity()
-    local function part(key,x,y,z,w,h,d,parent)
+    local look=npcLooks[id]
+    local pieces=avatarParts(id,look)
+    limbModel=limbModel or paintedModel(function(mesh)
+        loft(mesh,{{-.5,.29,.31},{-.416,.459,.461},{-.303,.49,.49},
+            {.313,.5,.5},{.436,.454,.457},{.5,.29,.31}},8,neutral)
+    end)
+    local function part(mat,x,y,z,w,h,d,parent,model)
         local entity=scene:entity()
         entity.parent=parent or root
         entity.position=V(x,y,z)
-        if key then
-            entity.model,entity.material=cubeModel,material(key)
+        if mat then
+            entity.model,entity.material=model or limbModel,mat
             entity.scale=V(w,h,d)
         end
         return entity
     end
     local route=npcPaths[id]
     root.position=V(route[1][1],0,route[1][2])
-    local actor={root=root,route=route,point=point,arms={},legs={},index=2,rest=2,
-        x=route[1][1],z=route[1][2],yaw=180,gait=0}
-    part(shirt,0,1.37,0,.53,.61,.29)
-    part("navy",0,.98,0,.45,.20,.30)
-    part("wood",0,1.85,-.013,.33,.39,.30)
-    part("dark",0,2.07,.004,.36,.13,.32)
+    root.scale=V(look.width,look.height,look.width)
+    local ink=material("avatarPaint")
+    local actor={id=id,root=root,route=route,point=point,arms={},elbows={},legs={},knees={},index=2,rest=2,
+        x=route[1][1],z=route[1][2],yaw=180,gait=0,stride=0}
+    part(ink,0,1.34,0,1,1,1,nil,pieces.body)
+    part(pieces.pants,0,1.001,0,.369,.242,.270)
+    part(pieces.skin,0,1.606,-.002,.147,.187,.159)
+    actor.head=part(nil,0,1.779,-.007)
+    part(ink,0,.071,0,look.faceWidth,look.faceHeight,1,actor.head,pieces.face)
     for i,side in ipairs({-1,1}) do
-        local arm=part(nil,side*.34,1.60,0)
-        local leg=part(nil,side*.129,1.01,0)
-        part(shirt,0,-.25,0,.16,.54,.20,arm)
-        part("navy",0,-.39,0,.185,.80,.21,leg)
-        part("shoe",0,-.92,-.059,.20,.12,.30,leg)
+        local arm=part(nil,side*.235,1.498,0)
+        local elbow=part(nil,side*.032,-.252,-.004,nil,nil,nil,arm)
+        local leg=part(nil,side*.100,.942,0)
+        local knee=part(nil,0,-.410,.008,nil,nil,nil,leg)
+        local exposed=look.outfit=="varsity" or look.outfit=="apron"
+        part(exposed and pieces.trim or pieces.shirt,side*.012,-.117,0,.159,.296,.174,arm)
+        part(exposed and pieces.skin or pieces.shirt,0,-.109,0,.130,.242,.138,elbow)
+        part(pieces.skin,0,-.268,-.005,.117,.141,.116,elbow)
+        part(pieces.pants,0,-.166,0,.202,.416,.224,leg)
+        part(look.outfit=="varsity" and pieces.skin or pieces.pants,0,-.187,0,.162,.411,.176,knee)
+        part(pieces.shoe,0,-.427,-.056,.197,.139,.321,knee)
+        part(material("rubber"),0,-.505,-.057,.201,.046,.323,knee)
         actor.arms[i],actor.legs[i]=arm,leg
+        actor.elbows[i],actor.knees[i]=elbow,knee
     end
     root.eulerAngles=V(0,actor.yaw,0)
     world.actors[#world.actors+1]=actor
@@ -481,14 +684,11 @@ function World.new(scene,zone)
                 spec[8] or destination.z,spec[9] or destination.yaw
         end
         world.hotspots[#world.hotspots+1]=point
-        if npcPaths[id] then
-            local shirts={ethan="teal",jace="orange",coach="navy",drip="violet"}
-            createAvatar(world,id,shirts[id],point)
-        end
+        if npcPaths[id] then createAvatar(world,id,point) end
     end
     if zone=="campus" then
-        createAvatar(world,"studentA","violet")
-        createAvatar(world,"studentB","redBrick")
+        createAvatar(world,"studentA")
+        createAvatar(world,"studentB")
     end
     return world
 end
@@ -546,13 +746,14 @@ end
 
 local function advanceActor(actor,dt,schedule,playerX,playerZ)
     local dx,dz=actor.x-playerX,actor.z-playerZ
-    local nearby=dx*dx+dz*dz < 22*22
+    local distanceSq=dx*dx+dz*dz
+    local nearby=distanceSq < 22*22
     actor.root.active=nearby
     if not nearby then return end
     local stride=0
     local point=actor.route[actor.index]
     -- Hold still briefly for dialogue, then return to the schedule route.
-    if not actor.point or dx*dx+dz*dz > 1.8*1.8 then
+    if not actor.point or distanceSq>actor.point.radius^2 then
         actor.rest=actor.rest-dt
         if actor.rest<=0 then
             dx,dz=point[1]-actor.x,point[2]-actor.z
@@ -573,14 +774,21 @@ local function advanceActor(actor,dt,schedule,playerX,playerZ)
                 stride=math.sin(actor.gait)*16
             end
         end
-    else
+    elseif distanceSq>.001 then
         local facing=math.deg((math.atan2 or math.atan)(dx,dz))
         actor.yaw=actor.yaw+((facing-actor.yaw+180)%360-180)*math.min(1,dt*5)
     end
-    actor.root.position=V(actor.x,0,actor.z)
+    actor.stride=actor.stride+(stride-actor.stride)*math.min(1,dt*11)
+    actor.root.position=V(actor.x,math.abs(actor.stride)*.0011,actor.z)
     actor.root.eulerAngles=V(0,actor.yaw,0)
-    actor.arms[1].eulerAngles,actor.arms[2].eulerAngles=V(-stride,0,0),V(stride,0,0)
-    actor.legs[1].eulerAngles,actor.legs[2].eulerAngles=V(stride,0,0),V(-stride,0,0)
+    actor.head.eulerAngles=V(1.5+math.abs(actor.stride)*.085,0,actor.stride*.10)
+    for i,side in ipairs(sides) do
+        local step=actor.stride*-side
+        actor.arms[i].eulerAngles=V(-step,0,side*7)
+        actor.elbows[i].eulerAngles=V(9+math.max(0,-step)*.55,0,0)
+        actor.legs[i].eulerAngles=V(step,0,0)
+        actor.knees[i].eulerAngles=V(-math.max(0,-step)*.76,0,0)
+    end
     if actor.point then actor.point.x,actor.point.z=actor.x,actor.z end
 end
 

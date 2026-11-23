@@ -42,16 +42,26 @@ local function baseLayout(safe)
     joystick.radius = radius
     local actionWidth = math.min(145,width*.42)
     local interact = box("interact","Interact",right-actionWidth*.5,bottom+73,actionWidth,45)
-    local orbitLeft = box("orbitLeft","‹",center+1,bottom+20,38,36)
-    local orbitRight = box("orbitRight","›",center+44,bottom+20,38,36)
+    local dockWidth = math.min(184,right-(joystick.x+radius+12))
+    local gap = 5
+    local buttonWidth = (dockWidth-3*gap)*.25
+    local function cameraButton(id,label,index)
+        local x = right-dockWidth+buttonWidth*.5+(index-1)*(buttonWidth+gap)
+        return box(id,label,x,bottom+20,buttonWidth,38)
+    end
+    local orbitLeft = cameraButton("orbitLeft","‹",1)
+    local orbitRight = cameraButton("orbitRight","›",2)
+    local zoomOut = cameraButton("zoomOut","−",3)
+    local zoomIn = cameraButton("zoomIn","+",4)
     local pause = box("pause","Ⅱ",right-21,top-22,42,42)
     local career = box("career","Career Log",left+(width-7)*.25,top-137,(width-7)*.5,37)
     local equipment = box("equipment","Equipment",right-(width-7)*.25,top-137,(width-7)*.5,37)
     return {
         left=left,right=right,top=top,bottom=bottom,center=center,width=width,
         joystick=joystick,interact=interact,orbitLeft=orbitLeft,orbitRight=orbitRight,
+        zoomOut=zoomOut,zoomIn=zoomIn,
         pause=pause,career=career,equipment=equipment,lookBottom=bottom+121,lookTop=top-165,
-        controls={interact,orbitLeft,orbitRight,pause,career,equipment}
+        controls={interact,orbitLeft,orbitRight,zoomOut,zoomIn,pause,career,equipment}
     }
 end
 
@@ -126,6 +136,8 @@ function UI.layout(roam)
         cache.buttons,cache.choices = cache.pauseItems,nil
     else
         cache.interact.enabled = roam.point~=nil
+        cache.zoomOut.enabled = roam.zoomSteps>P.FreeRoam.minZoom
+        cache.zoomIn.enabled = roam.zoomSteps<P.FreeRoam.maxZoom
         cache.buttons,cache.choices = cache.controls,nil
     end
     return cache
@@ -238,6 +250,8 @@ local function drawCampus(roam,hud)
     button(hud.equipment,pressed(roam,hud.equipment))
     button(hud.orbitLeft,pressed(roam,hud.orbitLeft),nil,21)
     button(hud.orbitRight,pressed(roam,hud.orbitRight),nil,21)
+    button(hud.zoomOut,pressed(roam,hud.zoomOut),nil,21)
+    button(hud.zoomIn,pressed(roam,hud.zoomIn),nil,21)
 
     local joy = hud.joystick
     ellipseMode(CENTER)

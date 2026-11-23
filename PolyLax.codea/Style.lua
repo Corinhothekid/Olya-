@@ -259,7 +259,7 @@ function Style.screen(page, l, elapsed, showcase, menuAssets)
         local hasLogo = menuAssets and PolyLax.MenuAssets.drawLogo(menuAssets,l.x,l.titleY,l.w*.94,logoHeight)
         local tempo = .5+.5*math.sin((elapsed or 0)*1.6)
         if not hasLogo then
-            local title = page == "FRONT" and "POLYLAX 3.4.1" or "Play Modes"
+            local title = page == "FRONT" and "POLYLAX 3.4.2" or "Play Modes"
             local size = page == "FRONT" and math.min(48,l.w*.164) or 30
             font("AvenirNext-HeavyItalic")
             if showcase then label(title,l.x+1,l.titleY+7,size,palette.deep,false,l.w) end

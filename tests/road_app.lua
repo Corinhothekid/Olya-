@@ -120,6 +120,84 @@ local function holdJoystick(dx,dy,count)
     input(ENDED,id,joy.x+dx*radius,joy.y+dy*radius)
 end
 
+-- Campus facades and interior signs are read from +Z. Read the actual
+-- merged quads left to right along +X and check asymmetric letter shapes.
+local function checkSignPrefix(world, z, cell, letters)
+    local centers, left, top={}, math.huge, -math.huge
+    for _,entity in ipairs(world.scene.entities) do
+        local positions=entity.model and entity.model.positions
+        for i=1,positions and #positions or 0,4 do
+            local a,b,c,d=positions[i],positions[i+1],positions[i+2],positions[i+3]
+            if d and math.abs(a.z-z)<.00001 and math.abs(b.z-z)<.00001
+                and math.abs(c.z-z)<.00001 and math.abs(d.z-z)<.00001 then
+                local x,y=(a.x+b.x+c.x+d.x)*.25,(a.y+b.y+c.y+d.y)*.25
+                centers[#centers+1]={x,y}
+                left,top=math.min(left,x),math.max(top,y)
+            end
+        end
+    end
+    assert(#centers>0,"Campus sign is missing")
+    local grid={{},{},{},{},{}}
+    for _,center in ipairs(centers) do
+        local col=math.floor((center[1]-left)/cell+.5)
+        local row=math.floor((top-center[2])/cell+.5)+1
+        grid[row][col]=true
+    end
+    for index,letter in ipairs(letters) do
+        for row,mask in ipairs(letter) do
+            for col=0,2 do
+                local lit=math.floor(mask/2^(2-col))%2==1
+                assert((grid[row][(index-1)*4+col] or false)==lit,"Campus sign glyph is mirrored")
+            end
+        end
+    end
+end
+checkSignPrefix(roam.world,-26.715,.114,{{4,4,4,4,7},{2,5,7,5,5}}) -- LA
+
+local function checkStrafe(direction)
+    frames(20)
+    local heading=math.rad(roam.cameraYaw)
+    local x,z=roam.x,roam.z
+    holdJoystick(direction,0,7)
+    local across=(roam.x-x)*math.cos(heading)-(roam.z-z)*math.sin(heading)
+    assert(direction*across>.25,"Horizontal joystick is reversed")
+end
+
+checkStrafe(1)
+checkStrafe(-1)
+tap(P.FreeRoamUI.layout(roam).orbitRight)
+frames(30)
+assert(roam.cameraYaw>20 and roam.cameraYaw<40,"Right orbit did not turn")
+checkStrafe(1)
+checkStrafe(-1)
+tap(P.FreeRoamUI.layout(roam).orbitLeft)
+frames(35)
+
+local zoomHUD=P.FreeRoamUI.layout(roam)
+for _,zoom in ipairs({assert(zoomHUD.zoomOut),assert(zoomHUD.zoomIn)}) do
+    assert(zoom.x-zoom.w*.5>=zoomHUD.left and zoom.x+zoom.w*.5<=zoomHUD.right
+        and zoom.y-zoom.h*.5>=zoomHUD.bottom and zoom.y+zoom.h*.5<=zoomHUD.top)
+    for _,other in ipairs(zoomHUD.buttons) do
+        if other~=zoom then
+            assert(math.abs(zoom.x-other.x)>=(zoom.w+other.w)*.5
+                or math.abs(zoom.y-other.y)>=(zoom.h+other.h)*.5,"Zoom overlaps another touch target")
+        end
+    end
+    local joy=zoomHUD.joystick
+    assert(math.abs(zoom.x-joy.x)>=(zoom.w+joy.w)*.5
+        or math.abs(zoom.y-joy.y)>=(zoom.h+joy.h)*.5,"Zoom overlaps the joystick")
+end
+local baselineFov=roam.camera.lens.fieldOfView
+for _=1,5 do tap(P.FreeRoamUI.layout(roam).zoomOut) end
+frames(30)
+assert(roam.zoomSteps==-3 and roam.camera.lens.fieldOfView>baselineFov+10,"Zoom Out did not widen the view")
+for _=1,8 do tap(P.FreeRoamUI.layout(roam).zoomIn) end
+frames(30)
+assert(roam.zoomSteps==3 and roam.camera.lens.fieldOfView<baselineFov-10,"Zoom In did not tighten the view")
+tap(P.FreeRoamUI.layout(roam).zoomOut)
+frames(20)
+assert(road.story.location.zoomSteps==2,"Stationary zoom did not save")
+
 local initial=P.FreeRoam.location(roam)
 local cameraBefore=roam.world.scene.camera.position
 holdJoystick(0,1,15)
@@ -180,9 +258,11 @@ end
 local function doorTo(zone)
     for _,point in pairs(P.FreeRoamWorld.anchors(roam.world)) do
         if point.zone==zone then
+            local zoom=roam.zoomSteps
             interact(point.id)
             frames(20,function() return roam.zone==zone and not roam.transition end)
             assert(roam.zone==zone and not roam.transition,"Door did not load "..zone)
+            assert(roam.zoomSteps==zoom and road.story.location.zoomSteps==zoom,"A doorway reset campus zoom")
             draw()
             return true
         end
@@ -227,7 +307,7 @@ local function walkTo(id)
         if distance<point.radius*.65 then break end
         local angle=math.rad(roam.cameraYaw)
         local s,c=math.sin(angle),math.cos(angle)
-        input(MOVING,finger,joy.x+(-c*dx+s*dz)*joy.radius/distance,
+        input(MOVING,finger,joy.x+(c*dx-s*dz)*joy.radius/distance,
             joy.y+(-s*dx-c*dz)*joy.radius/distance)
         draw()
     end
@@ -261,6 +341,7 @@ end
 finishPractice("equipment")
 
 visit("drip")
+checkSignPrefix(roam.world,-5.943,.11,{{6,5,5,5,6},{6,5,6,5,5}}) -- DR
 interact("drip")
 dialogue()
 assert(app.page=="ROAD_SHOP" and road.story.mission=="locker")
@@ -370,7 +451,8 @@ assert(app.page=="ROAD" and roam==road.roam)
 local restored=P.FreeRoam.location(roam)
 assert(restored.zone==clubLocation.zone and almost(restored.x,clubLocation.x)
     and almost(restored.z,clubLocation.z) and almost(restored.yaw,clubLocation.yaw)
-    and almost(restored.cameraYaw,clubLocation.cameraYaw),"Clubs changed the campus return position")
+    and almost(restored.cameraYaw,clubLocation.cameraYaw)
+    and restored.zoomSteps==clubLocation.zoomSteps,"Clubs changed the campus return position or zoom")
 
 setup()
 draw()
@@ -386,9 +468,10 @@ assert(road.story.equipment.equipped.shaftPattern==2 and road.story.equipment.eq
 assert(road.story.equipment.equipped.gloveFinish==2 and road.story.equipment.presets["1"])
 assert(restored.zone==clubLocation.zone and almost(restored.x,clubLocation.x)
     and almost(restored.z,clubLocation.z) and almost(restored.yaw,clubLocation.yaw)
-    and almost(restored.cameraYaw,clubLocation.cameraYaw),"Reload did not restore campus location or camera")
+    and almost(restored.cameraYaw,clubLocation.cameraYaw)
+    and restored.zoomSteps==clubLocation.zoomSteps,"Reload did not restore campus location or camera")
 for key,value in pairs(outside) do
     assert(mock.store[key]==value,"Story touched unrelated save "..key)
 end
 assert(not mock.store["PolyLax.Statistics.2.career-player"],"Story wrote legacy career statistics")
-print("Road to Glory app passed menu, creator, movement, camera, backpack, Drip Lab, quest dialogue, FullMatch results, Clubs return, reload, and save isolation.")
+print("Road to Glory passed camera-relative controls, sign geometry, zoom and persistence, story, equipment, games, Clubs return, and save isolation.")
