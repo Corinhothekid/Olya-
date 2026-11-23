@@ -1,11 +1,11 @@
-# PolyLax Road to Glory 3.4
+# PolyLax Road to Glory 3.4.1
 
 **Brothers in Arms, Act I · The Freshmen** runs from the first day at Briarbank through the tryout, placement decision, and the first team game.
 
 ## Install and play
 
 1. Back up your installed project. Keep the original project in Codea so its imported logo, soundtrack, and saves remain available.
-2. In a single-tab Legacy Craft project, replace all of Main with `releases/PolyLax-3.4-Main.lua` through `-- End of PolyLax 3.4`. For a modular project, update the `PolyLax.codea/` source using `Info.plist` for tab order. Use one installation format for your project.
+2. In a single-tab Legacy Craft project, replace all of Main with `releases/PolyLax-3.4.1-Main.lua` through `-- End of PolyLax 3.4.1`. For a modular project, update the `PolyLax.codea/` source using `Info.plist` for tab order. If you already have every 3.4 tab, update only RoadEquipment, Main, and Style. Use one installation format for your project.
 3. Run PolyLax and tap **Road to Glory**. The **Career** button in the campus HUD opens the journal and existing athlete editor. Edit the athlete before the tryout to choose a name, appearance, team, and one of the seven positions.
 4. Follow the objective tracker from Ethan in the courtyard to Mercer inside the school, Jace at the practice field, and Nina in the Drip Lab. Preview and equip cosmetics at the shop. Go to the locker room, complete first practice, and return to the bench to start the tryout.
 5. Close the match box score to return. Seek Mercer for your placement, then find Ethan. Play the first game when directed. Enter the clubhouse and choose **Enter Pro Clubs** to use the existing online Clubs menu. **Return to Campus** resumes your exploration in the clubhouse.
@@ -28,6 +28,8 @@ Drip Lab includes the 13 pattern families, five approximated chrome finishes, in
 
 ## Changed files
 
+The 3.4.1 patch fixes the touch crash caused by blending shoe or backpack trim with values read back from Craft materials. Color calculations now use the same numeric palette across campus, Drip Lab, and the playing kit. The save formats and equipment choices stay compatible.
+
 - New Codea tabs: `FreeRoam.lua`, `FreeRoamUI.lua`, `FreeRoamWorld.lua`, `Story.lua`, `StoryChapters.lua`, `RoadEquipment.lua`, `RoadEquipmentUI.lua`, and `RoadToGlory.lua`.
 - Updated Codea files: `AnimationController.lua`, `Character.lua`, `ClubsUI.lua`, `FullMatch.lua`, `Info.plist`, `Main.lua`, `Statistics.lua`, `Style.lua`, and `Ultimate.lua`.
 - New tests: `tests/road_app.lua`, `tests/road_story.lua`, and `tests/road_equipment.lua`. Updated the public packaging check in `tools/package_codea.py`.
@@ -40,9 +42,10 @@ From the repository root, run the Lua tests with Lua 5.4 and the shared Craft te
 ```sh
 lua tests/road_story.lua
 lua tests/road_equipment.lua
+lua tests/road_color.lua
 lua tests/road_app.lua
 POLYLAX_TEST_WIDTH=320 POLYLAX_TEST_HEIGHT=568 lua tests/road_app.lua
-python3 tools/package_codea.py --version 3.4 --check-main releases/PolyLax-3.4-Main.lua
+python3 tools/package_codea.py --version 3.4.1 --check-main releases/PolyLax-3.4.1-Main.lua
 ```
 
 The app tests use real game code and mocked Codea graphics, touch events, and local storage. They reach the practice field and match engine, record both game outcomes, reopen the Clubs menu, and verify a saved return to the same campus location and camera angle. For device validation, repeat that route on an iPhone and check camera framing, outfit materials, performance during zone transitions, and the Clubs return after an online session.

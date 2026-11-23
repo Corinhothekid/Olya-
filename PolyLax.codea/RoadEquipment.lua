@@ -82,9 +82,9 @@ local patterns = {
 Equipment.patterns = patterns
 
 local swatches = {
-    {"Graphite",40,53,67},{"Pearl",230,238,245},{"Varsity Green",39,115,88},
-    {"Cobalt",45,99,190},{"Crimson",166,47,62},{"Sunset",231,143,55},
-    {"Lavender",143,112,214},{"Ice",101,218,228},{"Rose",226,138,168}
+    {"Graphite",{40,53,67}},{"Pearl",{230,238,245}},{"Varsity Green",{39,115,88}},
+    {"Cobalt",{45,99,190}},{"Crimson",{166,47,62}},{"Sunset",{231,143,55}},
+    {"Lavender",{143,112,214}},{"Ice",{101,218,228}},{"Rose",{226,138,168}}
 }
 local colorNames, patternNames = {}, {}
 for i,v in ipairs(swatches) do colorNames[i]=v[1] end
@@ -223,16 +223,23 @@ function Equipment.preview(kit,id,value)
     return preview
 end
 
+local function colorFromRGB(rgb)
+    return color(rgb[1],rgb[2],rgb[3])
+end
+
 local function tint(i)
-    local swatch=swatches[i]
-    return color(swatch[2],swatch[3],swatch[4])
+    return colorFromRGB(swatches[i][2])
 end
 
-local function mix(a,b,amount)
-    return color(a.r+(b.r-a.r)*amount,a.g+(b.g-a.g)*amount,a.b+(b.b-a.b)*amount)
+-- Keep blending on the source palette. A Craft material can read back its diffuse
+-- value in a native representation with different fields from a Codea color.
+local function blendRGB(a,b,amount)
+    return color(a[1]+(b[1]-a[1])*amount,
+        a[2]+(b[2]-a[2])*amount,a[3]+(b[3]-a[3])*amount)
 end
 
-local black, white = color(24,31,42), color(246,248,247)
+local blackRGB = {24,31,42}
+local black, white = colorFromRGB(blackRGB), color(246,248,247)
 
 local function entity(r,parent,x,y,z)
     local e=r.scene:entity()
@@ -261,14 +268,14 @@ local function mesh(shape,pattern,swatch)
     local signature=shape..":"..pattern..":"..swatch
     if meshCache[signature] then return meshCache[signature] end
     local record=patterns[pattern] or {}
-    local base=tint(swatch)
+    local base=swatches[swatch][2]
     local colors={}
     if record.colors then
         for i,components in ipairs(record.colors) do
-            colors[i]=mix(color(components[1],components[2],components[3]),base,.25)
+            colors[i]=blendRGB(components,base,.25)
         end
     else
-        colors[1]=pattern==0 and white or base
+        colors[1]=pattern==0 and white or colorFromRGB(base)
     end
     local positions,normals,vertexColors,indices,uvs={},{},{},{},{}
     local radial=shape=="tube"
@@ -391,8 +398,9 @@ local function stick(r,opts)
     local headScale=({1,.93,1.08})[opts.headModel]
     r.stickHead.scale,r.stickMesh.scale=V(headScale,1,1),V(headScale,1,1)
     r.stickHead.material.diffuse=tint(opts.headColor)
-    local meshPaint=tint(opts.meshColor)
-    r.stickMesh.material.diffuse=opts.meshPattern==3 and mix(meshPaint,tint(opts.shootingStringColor),.44) or meshPaint
+    local meshRGB=swatches[opts.meshColor][2]
+    r.stickMesh.material.diffuse=opts.meshPattern==3
+        and blendRGB(meshRGB,swatches[opts.shootingStringColor][2],.44) or colorFromRGB(meshRGB)
     r.stickMesh.material.roughness=opts.meshPattern==2 and .68 or .91
     s.strings.active,s.goalieStrings.active=not goalie,goalie
     s.strings.position,s.strings.scale=V(0,size[4],0),V(headScale,1,1)
@@ -402,11 +410,11 @@ local function stick(r,opts)
 end
 
 local finishes = {
-    {rough=.50,metal=.06}, {paint=color(185,204,228),rough=.13,metal=.80},
-    {paint=color(229,185,79),rough=.15,metal=.78},
-    {paint=color(63,72,90),rough=.14,metal=.80},
-    {paint=color(208,132,121),rough=.16,metal=.76},
-    {paint=color(143,130,227),accent=color(85,225,221),rough=.17,metal=.76}
+    {rough=.50,metal=.06}, {rgb={185,204,228},rough=.13,metal=.80},
+    {rgb={229,185,79},rough=.15,metal=.78},
+    {rgb={63,72,90},rough=.14,metal=.80},
+    {rgb={208,132,121},rough=.16,metal=.76},
+    {rgb={143,130,227},accent=color(85,225,221),rough=.17,metal=.76}
 }
 
 local function buildMatch(r)
@@ -439,8 +447,8 @@ function Equipment.applyMatch(r,kit)
     stick(r,ops)
     local m=buildMatch(r)
     local finish=finishes[ops.gloveFinish]
-    local paint=tint(ops.gloveColor)
-    r.materials.gloves.diffuse=finish.paint and mix(finish.paint,paint,.22) or paint
+    local gloveRGB=swatches[ops.gloveColor][2]
+    r.materials.gloves.diffuse=finish.rgb and blendRGB(finish.rgb,gloveRGB,.22) or colorFromRGB(gloveRGB)
     r.materials.gloveTrim.diffuse=finish.accent or tint(ops.gloveSecondary)
     r.materials.gloves.roughness,r.materials.gloves.metalness=finish.rough,finish.metal
     if ops.gloveFinish>1 then
@@ -534,12 +542,15 @@ function Equipment.applyCasual(r,profile,kit,stickType)
             glove.pads.active,glove.cuff.active,wrap.thigh.active,wrap.shin.active=false,false,false,false
         end
     end
-    r.materials.hoodie.diffuse=tint(ops.hoodieColor)
-    r.materials.hoodTrim.diffuse=mix(tint(ops.hoodieColor),black,.48)
-    c.sneakers.diffuse,c.joggers.diffuse=tint(ops.sneakerColor),tint(ops.joggerColor)
-    c.shoeTrim.diffuse=mix(c.sneakers.diffuse,black,.78)
-    c.pack.diffuse=tint(ops.backpackColor)
-    c.packTrim.diffuse=mix(c.pack.diffuse,black,.54)
+    local hoodieRGB=swatches[ops.hoodieColor][2]
+    local sneakerRGB=swatches[ops.sneakerColor][2]
+    local packRGB=swatches[ops.backpackColor][2]
+    r.materials.hoodie.diffuse=colorFromRGB(hoodieRGB)
+    r.materials.hoodTrim.diffuse=blendRGB(hoodieRGB,blackRGB,.48)
+    c.sneakers.diffuse,c.joggers.diffuse=colorFromRGB(sneakerRGB),tint(ops.joggerColor)
+    c.shoeTrim.diffuse=blendRGB(sneakerRGB,blackRGB,.78)
+    c.pack.diffuse=colorFromRGB(packRGB)
+    c.packTrim.diffuse=blendRGB(packRGB,blackRGB,.54)
     local packShape=({{.575,.606,.31},{.505,.704,.263},{.611,.707,.34}})[ops.backpackStyle]
     c.packShell.scale=V(packShape[1],packShape[2],packShape[3])
     c.packCover.position=V(0,packShape[2]*.38,.262)
